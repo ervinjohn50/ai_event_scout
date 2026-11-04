@@ -14,18 +14,33 @@ import sys
 from collections.abc import Mapping
 from datetime import date
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import anthropic
 
 from . import __version__
-from .agent import ScoutAgent
+from .agent import AgentObserver, AgentReply, ScoutAgent
 from .config import DEFAULT_EFFORT, DEFAULT_MAX_STEPS, DEFAULT_MODEL, EFFORT_LEVELS, PRICING, AgentConfig
 from .events import EventSource, SampleEventSource, TicketmasterEventSource
 from .prompts import build_system_prompt
 from .shortlist import DEFAULT_SHORTLIST_PATH, ShortlistError, ShortlistStore
-from .tools import build_tools
+from .tools import ToolRegistry, build_tools
 from .trace import ConsoleTrace
+
+ENGINES = ("handwritten", "langgraph")
+
+
+class Engine(Protocol):
+    """What the CLI needs from an agent. `ScoutAgent` and `LangGraphScoutAgent` both fit."""
+
+    config: AgentConfig
+
+    def ask(self, user_text: str) -> AgentReply: ...
+
+    def reset(self) -> None: ...
+
+    def export_messages(self) -> list[dict[str, Any]]: ...
+
 
 HELP_TEXT = """\
 Commands:
@@ -44,17 +59,20 @@ No Claude API key found.
 
 The offline tests don't need a key: uv run pytest"""
 
+LANGCHAIN_MISSING_TEXT = """\
+The langgraph engine needs the optional LangChain packages. Install them with:
 
-def main(argv: list[str] | None = None, client: Any = None) -> int:
-    """Entry point. `client` lets tests pass in a fake instead of the real API client."""
+  uv sync --extra langchain"""
+
+
+def main(argv: list[str] | None = None, client: Any = None, chat_model: Any = None) -> int:
+    """Entry point. `client` and `chat_model` let tests pass in fakes instead of real ones."""
     load_dotenv(Path(".env"))
     args = parse_args(argv)
 
-    if client is None:
-        if not has_anthropic_credentials(os.environ):
-            print(NO_CREDENTIALS_TEXT, file=sys.stderr)
-            return 2
-        client = anthropic.Anthropic()
+    if client is None and chat_model is None and not has_credentials_for(args.engine, os.environ):
+        print(NO_CREDENTIALS_TEXT, file=sys.stderr)
+        return 2
 
     source = choose_source(args.offline, os.environ)
     store = ShortlistStore(args.shortlist_path)
@@ -65,19 +83,44 @@ def main(argv: list[str] | None = None, client: Any = None) -> int:
         use_fallbacks=not args.no_fallbacks,
     )
     trace = None if args.quiet else ConsoleTrace(pricing=PRICING.get(args.model), verbose=args.verbose)
-    agent = ScoutAgent(
-        client,
-        build_tools(source, store),
-        build_system_prompt(date.today(), source.describe()),
-        config,
-        observer=trace,
-    )
+    try:
+        agent = build_agent(
+            args.engine,
+            build_tools(source, store),
+            build_system_prompt(date.today(), source.describe()),
+            config,
+            trace,
+            client=client,
+            chat_model=chat_model,
+        )
+    except ImportError:
+        print(LANGCHAIN_MISSING_TEXT, file=sys.stderr)
+        return 2
 
     if args.question:
         return 0 if ask_and_print(agent, trace, args.question) else 1
 
-    print_banner(config, source)
+    print_banner(config, source, args.engine)
     return repl(agent, trace, store)
+
+
+def build_agent(
+    engine: str,
+    tools: ToolRegistry,
+    system_prompt: str,
+    config: AgentConfig,
+    observer: AgentObserver | None,
+    client: Any = None,
+    chat_model: Any = None,
+) -> Engine:
+    """Create the chosen engine. Both get the same tools, prompt, settings, and observer."""
+    if engine == "langgraph":
+        # Imported here because LangChain is optional: the handwritten engine must work
+        # without it. A missing package raises ImportError, which main() reports.
+        from .langgraph_agent import LangGraphScoutAgent, build_chat_model
+
+        return LangGraphScoutAgent(chat_model or build_chat_model(config), tools, system_prompt, config, observer)
+    return ScoutAgent(client or anthropic.Anthropic(), tools, system_prompt, config, observer)
 
 
 # --- Setup helpers -----------------------------------------------------------------------
@@ -89,6 +132,12 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         description="Chat with an AI agent that finds concerts and live events.",
     )
     parser.add_argument("question", nargs="?", help="ask one question and exit (omit to chat)")
+    parser.add_argument(
+        "--engine",
+        choices=ENGINES,
+        default="handwritten",
+        help="which agent loop to run: this project's own, or LangGraph (default: handwritten)",
+    )
     parser.add_argument("--model", default=DEFAULT_MODEL, help=f"Claude model id (default: {DEFAULT_MODEL})")
     parser.add_argument(
         "--effort",
@@ -150,6 +199,13 @@ def has_anthropic_credentials(env: Mapping[str, str]) -> bool:
     return (Path.home() / ".config" / "anthropic").is_dir()
 
 
+def has_credentials_for(engine: str, env: Mapping[str, str]) -> bool:
+    # ChatAnthropic reads only ANTHROPIC_API_KEY, not the SDK's other credential sources.
+    if engine == "langgraph":
+        return bool(env.get("ANTHROPIC_API_KEY"))
+    return has_anthropic_credentials(env)
+
+
 def choose_source(offline: bool, env: Mapping[str, str]) -> EventSource:
     api_key = env.get("TICKETMASTER_API_KEY")
     if api_key and not offline:
@@ -157,18 +213,18 @@ def choose_source(offline: bool, env: Mapping[str, str]) -> EventSource:
     return SampleEventSource()
 
 
-def print_banner(config: AgentConfig, source: EventSource) -> None:
+def print_banner(config: AgentConfig, source: EventSource, engine: str) -> None:
     data = "live Ticketmaster data" if source.name == "ticketmaster" else (
         "offline sample data (set TICKETMASTER_API_KEY for live events)"
     )
     print(f"Event Scout | {config.model}, effort {config.effort} | {data}")
-    print("Ask about concerts and events, or type /help.")
+    print(f"Engine: {engine}. Ask about concerts and events, or type /help.")
 
 
 # --- Asking questions ----------------------------------------------------------------------
 
 
-def ask_and_print(agent: ScoutAgent, trace: ConsoleTrace | None, question: str) -> bool:
+def ask_and_print(agent: Engine, trace: ConsoleTrace | None, question: str) -> bool:
     """Run one question through the agent and print the answer. Returns False on failure.
 
     API errors are caught most-specific first, so each gets a message that says what
@@ -205,7 +261,7 @@ def _fail(message: str) -> bool:
 # --- Interactive chat ----------------------------------------------------------------------
 
 
-def repl(agent: ScoutAgent, trace: ConsoleTrace | None, store: ShortlistStore) -> int:
+def repl(agent: Engine, trace: ConsoleTrace | None, store: ShortlistStore) -> int:
     """Read-eval-print loop: read a line, act on it, print the result, repeat."""
     try:
         import readline  # noqa: F401  (gives input() arrow keys and history on macOS/Linux)
@@ -233,7 +289,7 @@ def repl(agent: ScoutAgent, trace: ConsoleTrace | None, store: ShortlistStore) -
             print("\n(Interrupted. Started a new conversation.)")
 
 
-def handle_command(line: str, agent: ScoutAgent, store: ShortlistStore) -> bool:
+def handle_command(line: str, agent: Engine, store: ShortlistStore) -> bool:
     """Handle a /command. Returns False when the user wants to quit."""
     command = line.split()[0].lower()
     if command in ("/quit", "/exit"):
