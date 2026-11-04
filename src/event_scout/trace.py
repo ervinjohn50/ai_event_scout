@@ -34,15 +34,21 @@ class ConsoleTrace(AgentObserver):
         self,
         pricing: Pricing | None = None,
         verbose: bool = False,
-        out: TextIO = sys.stdout,
+        out: TextIO | None = None,
         color: bool | None = None,
     ) -> None:
         self.pricing = pricing
         self.verbose = verbose
-        self.out = out
+        # Not `out: TextIO = sys.stdout`: a default value is evaluated once, when the
+        # module is imported, so it would miss any later redirect of sys.stdout.
+        self._out = out
         if color is None:  # color only in a real terminal, and never if NO_COLOR is set
-            color = out.isatty() and "NO_COLOR" not in os.environ
+            color = self.out.isatty() and "NO_COLOR" not in os.environ
         self.color = color
+
+    @property
+    def out(self) -> TextIO:
+        return self._out or sys.stdout
 
     # --- AgentObserver hooks ---------------------------------------------------------------
 
