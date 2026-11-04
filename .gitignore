@@ -12,5 +12,8 @@ dist/
 # Runtime data written by the agent (your personal shortlist)
 data/
 
+# Personal learning notes, kept local only
+docs/HOW_IT_WORKS.md
+
 # OS
 .DS_Store
