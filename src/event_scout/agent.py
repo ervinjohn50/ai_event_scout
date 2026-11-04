@@ -4,18 +4,18 @@ An "agent" is just this loop:
 
     send the conversation to Claude
     -> Claude replies. Its `stop_reason` says why it stopped:
-         "tool_use"  it wants us to run one or more tools
+         "tool_use"  it wants one or more tools run
          "end_turn"  it's done and the reply is the answer
     -> if tools were requested: run them, add the results to the conversation, repeat
     -> otherwise: return the answer
 
-Claude decides WHICH tools to call and WHEN to stop. Our code decides HOW tools run
+Claude decides WHICH tools to call and WHEN to stop. This code decides HOW tools run
 and enforces the limits (a maximum number of steps, input validation).
 
 Two rules the API depends on, both enforced below:
 1. The API is stateless. It remembers nothing between requests, so every request
-   carries the full conversation (`self.messages`). We only ever APPEND to that list.
-   We never edit or delete earlier entries.
+   carries the full conversation (`self.messages`). That list is append-only:
+   earlier entries are never edited or deleted.
 2. Every `tool_use` block Claude sends must be answered by a `tool_result` block with
    the same id, in the very next user message.
 """
@@ -106,8 +106,8 @@ class ScoutAgent:
 
             if response.stop_reason == "pause_turn":
                 # The API paused a long turn. Sending the conversation again (with no new
-                # user message) lets it resume. Only server-side tools cause this; ours
-                # all run locally, but handling it keeps the loop correct.
+                # user message) lets it resume. Only server-side tools cause this; the tools
+                # here all run locally, but handling it keeps the loop correct.
                 continue
 
             # Anything else ends the turn: "end_turn" (finished), "max_tokens" (cut off),
@@ -171,9 +171,9 @@ class ScoutAgent:
         """Keep the history valid when a reply stopped mid-tool-call.
 
         If a reply hit max_tokens (or was declined) while writing a tool call, that call
-        may be incomplete, so we must not run it. But rule 2 still applies: the next
-        request is rejected unless every tool_use has a tool_result. So we answer each
-        one with an error saying it wasn't run.
+        may be incomplete, so it must not run. But rule 2 still applies: the next
+        request is rejected unless every tool_use has a tool_result. So each one is
+        answered with an error saying it wasn't run.
         """
         unanswered = [block for block in content if block.type == "tool_use"]
         if unanswered:
@@ -208,7 +208,7 @@ class ScoutAgent:
 
         return text or "(Claude finished without writing a reply.)"
 
-    # --- For learning: see exactly what the API sees ---------------------------------------
+    # --- Debugging: the conversation exactly as the API sees it ---------------------------------------
 
     def export_messages(self) -> list[dict[str, Any]]:
         """The conversation as plain JSON-ready dicts (SDK objects converted)."""

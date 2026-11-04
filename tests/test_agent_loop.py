@@ -1,7 +1,7 @@
 """Tests for the agent loop, using a fake Claude that replays scripted responses.
 
 Each test reads like a little story: "Claude asks for this tool, then says that",
-followed by checks on what our loop sent, ran, and returned.
+followed by checks on what the loop sent, ran, and returned.
 """
 
 import json
@@ -70,7 +70,7 @@ def test_tool_call_then_final_answer(tools):
     assert tools.calls == [("search_events", {"city": "Chicago", "category": "sports"})]
 
     # The second request carries the whole conversation: question, Claude's tool call,
-    # and our tool result answering it with the matching id.
+    # and the tool result answering it with the matching id.
     sent = client.requests[1]["messages"]
     assert [m["role"] for m in sent] == ["user", "assistant", "user"]
     [result] = tool_results_in(sent[2])

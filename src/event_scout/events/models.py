@@ -1,6 +1,6 @@
 """The normalized Event model.
 
-Every data source (Ticketmaster, the offline sample file, anything you add later)
+Every data source (Ticketmaster, the offline sample file, anything added later)
 converts its own format into this one shape. The tools and the agent only ever see
 `Event`, so swapping data sources never touches the agent code.
 """
@@ -74,7 +74,7 @@ class Event:
         )
 
     def details(self) -> dict[str, Any]:
-        """Everything we know about the event, for `get_event_details`."""
+        """Every known detail about the event, for `get_event_details`."""
         return _drop_none(
             {
                 **self.summary(),

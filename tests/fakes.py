@@ -67,7 +67,7 @@ class FakeClient:
 
     def _create(self, **request: Any) -> BetaMessage:
         # Deep copy: the agent keeps appending to its `messages` list after this call,
-        # and we want a snapshot of what was actually sent at this moment.
+        # and the test needs a snapshot of what was actually sent at this moment.
         self.requests.append(copy.deepcopy(request))
         if not self._responses:
             raise AssertionError("FakeClient ran out of scripted responses")

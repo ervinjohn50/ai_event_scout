@@ -1,4 +1,4 @@
-"""Prints each step of the agent loop as it runs, so you can watch the agent work.
+"""Prints each step of the agent loop as it runs, so the agent's work is visible.
 
 A typical question looks like this:
 

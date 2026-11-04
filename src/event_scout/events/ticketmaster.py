@@ -4,8 +4,8 @@ Docs: https://developer.ticketmaster.com/products-and-docs/apis/discovery-api/v2
 A free API key gives 5,000 calls/day at up to 5 requests/second.
 
 Two jobs live here:
-1. Build the HTTP request from our search filters.
-2. Convert Ticketmaster's deeply nested JSON into our flat `Event` model.
+1. Build the HTTP request from the search filters.
+2. Convert Ticketmaster's deeply nested JSON into the flat `Event` model.
    Real-world API data is messy (fields go missing all the time), so the parser
    uses `.get()` everywhere and never assumes a field exists.
 """
@@ -25,7 +25,7 @@ from .models import Event
 
 BASE_URL = "https://app.ticketmaster.com/discovery/v2"
 
-# Our category words -> Ticketmaster "segment" names.
+# The app's category words -> Ticketmaster "segment" names.
 CATEGORY_TO_SEGMENT = {
     "music": "Music",
     "sports": "Sports",
@@ -127,7 +127,7 @@ class _NotFound(Exception):
 
 
 def parse_event(raw: dict[str, Any]) -> Event:
-    """Flatten one Ticketmaster event object into our `Event` model."""
+    """Flatten one Ticketmaster event object into an `Event`."""
     start = raw.get("dates", {}).get("start", {})
     venue = _first(raw.get("_embedded", {}).get("venues"))
     classification = _first(raw.get("classifications"))

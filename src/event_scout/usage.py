@@ -50,7 +50,7 @@ class TokenUsage:
         return self.input_tokens + self.cache_read_tokens + self.cache_write_tokens
 
     def cost(self, pricing: Pricing | None) -> float | None:
-        """Estimated cost in USD, or None if we don't know the model's prices."""
+        """Estimated cost in USD, or None if the model's prices aren't known."""
         if pricing is None:
             return None
         return (

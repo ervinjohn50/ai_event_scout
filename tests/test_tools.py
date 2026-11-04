@@ -190,7 +190,7 @@ class FailingSource(SampleEventSource):
 
 class BuggySource(SampleEventSource):
     def get(self, event_id):
-        raise KeyError("oops")  # simulates a bug in our own code
+        raise KeyError("oops")  # simulates a bug in the app's own code
 
 
 def test_data_source_error_becomes_an_error_result(store):

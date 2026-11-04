@@ -1,7 +1,7 @@
 """Offline event source backed by a bundled JSON file of fictional events.
 
 Dates in the file are stored as `days_from_today` offsets rather than fixed dates,
-so the sample data is always "upcoming" no matter when you run the project.
+so the sample data is always "upcoming" no matter when the project runs.
 """
 
 from __future__ import annotations

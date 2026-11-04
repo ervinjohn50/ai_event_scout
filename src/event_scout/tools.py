@@ -1,17 +1,17 @@
 """The tools the agent can use, and the code that runs them.
 
 How tool use works:
-  1. We send Claude a list of tool *definitions*: a name, a description, and a JSON
-     Schema describing the inputs. That is ALL Claude knows about a tool. It never
-     sees this Python code.
+  1. Each request sends Claude a list of tool *definitions*: a name, a description,
+     and a JSON Schema describing the inputs. That is ALL Claude knows about a tool.
+     It never sees this Python code.
   2. When Claude wants to use a tool, its reply contains a `tool_use` block, e.g.
      {"name": "search_events", "input": {"city": "Chicago"}}.
-  3. OUR code runs the matching function (`ToolRegistry.run`) and sends the result
+  3. The app runs the matching function (`ToolRegistry.run`) and sends the result
      back as a `tool_result` block. Claude reads it and decides what to do next.
 
-So a "tool" is three things: a Pydantic model for its input (which gives us the
-JSON Schema AND the validation), a description that tells the model when to use
-it, and an ordinary Python function that does the work.
+So a "tool" is three things: a Pydantic model for its input (which provides both
+the JSON Schema and the validation), a description that tells the model when to
+use it, and an ordinary Python function that does the work.
 """
 
 from __future__ import annotations
@@ -33,8 +33,8 @@ class ToolError(Exception):
 
 
 # --- Input models ----------------------------------------------------------------------
-# Each field's `description` ends up in the JSON Schema Claude sees, so write them for
-# the model: say what format you expect and give an example.
+# Each field's `description` ends up in the JSON Schema Claude sees, so they're
+# written for the model: each states the expected format and gives an example.
 # `extra="forbid"` rejects fields the model invents (like "town" instead of "city").
 
 
@@ -144,7 +144,7 @@ class ToolRegistry:
             result = tool.handler(args)
         except (ToolError, EventSourceError, ShortlistError) as err:
             return ToolOutcome(str(err), True)
-        except Exception as err:  # a bug in our code: report it, don't crash the agent
+        except Exception as err:  # a bug in this code: report it, don't crash the agent
             return ToolOutcome(f"Internal error in {name}: {type(err).__name__}: {err}", True)
 
         return ToolOutcome(json.dumps(result, ensure_ascii=False, default=str))
@@ -174,8 +174,8 @@ def build_tools(source: EventSource, shortlist: ShortlistStore) -> ToolRegistry:
 
     def save_to_shortlist(args: SaveToShortlistInput) -> dict[str, Any]:
         # A tool with a side effect (it writes a file). Saving is harmless, so it runs
-        # without asking. A riskier action (buying tickets, sending an email) is where
-        # you'd stop and ask the user to confirm before doing anything.
+        # without asking. A riskier action (buying tickets, sending an email) should
+        # stop and ask the user to confirm before doing anything.
         event = source.get(args.event_id)
         if event is None:
             raise ToolError(f"No event with id '{args.event_id}'. Use an id from search_events.")

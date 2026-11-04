@@ -7,8 +7,8 @@ from dataclasses import dataclass
 DEFAULT_MODEL = "claude-opus-5-5"
 
 # Effort controls how much the model thinks before answering, and therefore its speed
-# and cost. Claude Opus 5.5 defaults to "medium" when you don't set it; we set it
-# explicitly so the choice is visible and easy to experiment with.
+# and cost. Claude Opus 5.5 defaults to "medium" when it isn't set; it's set explicitly
+# here so the choice is visible and easy to change.
 EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
 DEFAULT_EFFORT = "medium"
 
@@ -17,7 +17,7 @@ DEFAULT_EFFORT = "medium"
 DEFAULT_MAX_TOKENS = 16_000
 
 # The most model calls one question may take. An agent decides for itself when it's
-# done, so we need a hard limit in case it never decides (a bug, or a confusing tool).
+# done, so a hard limit is needed in case it never decides (a bug, or a confusing tool).
 DEFAULT_MAX_STEPS = 10
 
 # Opt-in beta: if a safety filter wrongly declines a request, the API retries it on
