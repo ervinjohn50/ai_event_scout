@@ -1,0 +1,57 @@
+{
+  "_embedded": {
+    "events": [
+      {
+        "name": "Velvet Static: North American Tour",
+        "type": "event",
+        "id": "vvG1aZ9KbEXAMPLE",
+        "url": "https://www.ticketmaster.com/event/vvG1aZ9KbEXAMPLE",
+        "dates": {
+          "start": {"localDate": "2026-11-14", "localTime": "19:30:00", "dateTBD": false, "timeTBA": false},
+          "timezone": "America/Chicago",
+          "status": {"code": "onsale"}
+        },
+        "classifications": [
+          {
+            "primary": true,
+            "segment": {"id": "KZFzniwnSyZfZ7v7nJ", "name": "Music"},
+            "genre": {"id": "KnvZfZ7vAeA", "name": "Rock"},
+            "subGenre": {"id": "KZazBEonSMnZfZ7v6dt", "name": "Alternative Rock"}
+          }
+        ],
+        "priceRanges": [
+          {"type": "standard", "currency": "USD", "min": 39.5, "max": 89.5},
+          {"type": "standard including fees", "currency": "USD", "min": 48.0, "max": 104.25}
+        ],
+        "_embedded": {
+          "venues": [
+            {
+              "name": "Riverfront Theatre",
+              "city": {"name": "Chicago"},
+              "state": {"name": "Illinois", "stateCode": "IL"},
+              "country": {"name": "United States Of America", "countryCode": "US"},
+              "address": {"line1": "123 W Example St"}
+            }
+          ],
+          "attractions": [
+            {"name": "Velvet Static", "type": "attraction"},
+            {"name": "Kestrel Moon", "type": "attraction"}
+          ]
+        }
+      },
+      {
+        "name": "Mystery Show",
+        "type": "event",
+        "id": "Z7r9jZ1AEXAMPLE2",
+        "dates": {
+          "start": {"dateTBD": true, "timeTBA": true},
+          "status": {"code": "offsale"}
+        },
+        "classifications": [
+          {"segment": {"name": "Miscellaneous"}, "genre": {"name": "Undefined"}}
+        ]
+      }
+    ]
+  },
+  "page": {"size": 2, "totalElements": 2, "totalPages": 1, "number": 0}
+}
