@@ -26,6 +26,7 @@ from .prompts import build_system_prompt
 from .shortlist import DEFAULT_SHORTLIST_PATH, ShortlistError, ShortlistStore
 from .tools import ToolRegistry, build_tools
 from .trace import ConsoleTrace
+from .tracing import configure_tracing, flush_traces
 
 ENGINES = ("handwritten", "langgraph")
 
@@ -83,6 +84,7 @@ def main(argv: list[str] | None = None, client: Any = None, chat_model: Any = No
         use_fallbacks=not args.no_fallbacks,
     )
     trace = None if args.quiet else ConsoleTrace(pricing=PRICING.get(args.model), verbose=args.verbose)
+    tracing = configure_tracing()
     try:
         agent = build_agent(
             args.engine,
@@ -92,16 +94,20 @@ def main(argv: list[str] | None = None, client: Any = None, chat_model: Any = No
             trace,
             client=client,
             chat_model=chat_model,
+            tracing=tracing,
         )
     except ImportError:
         print(LANGCHAIN_MISSING_TEXT, file=sys.stderr)
         return 2
 
-    if args.question:
-        return 0 if ask_and_print(agent, trace, args.question) else 1
-
-    print_banner(config, source, args.engine)
-    return repl(agent, trace, store)
+    try:
+        if args.question:
+            return 0 if ask_and_print(agent, trace, args.question) else 1
+        print_banner(config, source, args.engine, tracing)
+        return repl(agent, trace, store)
+    finally:
+        if tracing:
+            flush_traces()
 
 
 def build_agent(
@@ -112,15 +118,29 @@ def build_agent(
     observer: AgentObserver | None,
     client: Any = None,
     chat_model: Any = None,
+    tracing: bool = False,
 ) -> Engine:
     """Create the chosen engine. Both get the same tools, prompt, settings, and observer."""
+    agent: Engine
     if engine == "langgraph":
         # Imported here because LangChain is optional: the handwritten engine must work
         # without it. A missing package raises ImportError, which main() reports.
         from .langgraph_agent import LangGraphScoutAgent, build_chat_model
 
-        return LangGraphScoutAgent(chat_model or build_chat_model(config), tools, system_prompt, config, observer)
-    return ScoutAgent(client or anthropic.Anthropic(), tools, system_prompt, config, observer)
+        agent = LangGraphScoutAgent(chat_model or build_chat_model(config), tools, system_prompt, config, observer)
+    else:
+        client = client or anthropic.Anthropic()
+        if tracing:
+            from .tracing import TracedToolRegistry, trace_client
+
+            client, tools = trace_client(client), TracedToolRegistry(tools)
+        agent = ScoutAgent(client, tools, system_prompt, config, observer)
+
+    if tracing:
+        from .tracing import TracedEngine
+
+        agent = TracedEngine(agent, engine)
+    return agent
 
 
 # --- Setup helpers -----------------------------------------------------------------------
@@ -213,12 +233,13 @@ def choose_source(offline: bool, env: Mapping[str, str]) -> EventSource:
     return SampleEventSource()
 
 
-def print_banner(config: AgentConfig, source: EventSource, engine: str) -> None:
+def print_banner(config: AgentConfig, source: EventSource, engine: str, tracing: bool = False) -> None:
     data = "live Ticketmaster data" if source.name == "ticketmaster" else (
         "offline sample data (set TICKETMASTER_API_KEY for live events)"
     )
     print(f"Event Scout | {config.model}, effort {config.effort} | {data}")
-    print(f"Engine: {engine}. Ask about concerts and events, or type /help.")
+    print(f"Engine: {engine}. LangSmith tracing: {'on' if tracing else 'off'}.")
+    print("Ask about concerts and events, or type /help.")
 
 
 # --- Asking questions ----------------------------------------------------------------------
