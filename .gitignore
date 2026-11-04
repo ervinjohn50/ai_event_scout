@@ -1,0 +1,16 @@
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+dist/
+*.egg-info/
+
+# Runtime data written by the agent (your personal shortlist)
+data/
+
+# OS
+.DS_Store

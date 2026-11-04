@@ -1,0 +1,29 @@
+[project]
+name = "event-scout"
+version = "0.1.0"
+description = "A concert and event scout agent built on a hand-written Claude tool-use loop."
+readme = "README.md"
+authors = [
+    { name = "ervinjohn50", email = "71913788+ervinjohn50@users.noreply.github.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "anthropic>=2.4.0",
+    "pydantic>=2.14.2",
+]
+
+[project.scripts]
+event-scout = "event_scout.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.11.23,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["tests"]
