@@ -2,7 +2,7 @@
 
 A terminal agent that finds concerts and live events. Ask a question in plain English, and it decides which tools to call, runs them, reads the results, and answers.
 
-The agent is built twice: once as a **hand-written tool-use loop** over the Claude API, and once with **LangChain and LangGraph**. Both share the same tools and prompt, are traced with **LangSmith**, and are scored on the same evaluation set. The hand-written loop keeps every part of how an agent works visible; the second engine shows what a framework takes on and what it hides.
+The agent is built twice: once as a **custom tool-use loop** over the Claude API, and once with **LangChain and LangGraph**. Both share the same tools and prompt, are traced with **LangSmith**, and are scored on the same evaluation set. The custom loop keeps every part of how an agent works visible; the second engine shows what a framework takes on and what it hides.
 
 ## What it does
 
@@ -55,7 +55,7 @@ uv run event-scout "What jazz is on in New York this week?"
 - **API key:** create one at [platform.claude.com](https://platform.claude.com/settings/keys).
 - **Cost:** about 1¢ per question at low effort on the default model, Claude Sonnet 5.5, as measured in the evaluation below. Claude Opus 5.5 is available with `--model claude-opus-5-5`, at twice the per-token price.
 - **Live events (optional):** get a free key at [developer.ticketmaster.com](https://developer.ticketmaster.com) and set `TICKETMASTER_API_KEY`. Without it, the app uses the offline data, which covers Chicago, New York, Austin, Los Angeles, Seattle, Toronto, and London.
-- **Smaller install (optional):** the hand-written engine needs only `anthropic` and `pydantic`. `uv sync --no-dev` installs just those, and `uv sync --no-dev --extra langchain` adds the LangChain packages.
+- **Smaller install (optional):** the custom engine needs only `anthropic` and `pydantic`. `uv sync --no-dev` installs just those, and `uv sync --no-dev --extra langchain` adds the LangChain packages.
 
 ## Commands and options
 
@@ -72,7 +72,7 @@ On the command line:
 
 | Option | Default | What it does |
 |---|---|---|
-| `--engine {handwritten,langgraph}` | `handwritten` | Which agent loop to run |
+| `--engine {custom,langgraph}` | `custom` | Which agent loop to run |
 | `--effort {low,medium,high,xhigh,max}` | `medium` | How hard the model thinks: lower is faster and cheaper |
 | `--model MODEL` | `claude-sonnet-5-5` | Which Claude model to use |
 | `--offline` | off | Use the sample data even if a Ticketmaster key is set |
@@ -85,7 +85,7 @@ On the command line:
 ```mermaid
 flowchart LR
     U([You]) <--> CLI[cli.py<br/>chat + commands]
-    CLI --> A[agent.py<br/>hand-written loop]
+    CLI --> A[agent.py<br/>custom loop]
     CLI --> G[langgraph_agent.py<br/>LangGraph]
     A <-->|messages + tool definitions| C[(Claude API)]
     G <-->|same requests| C
@@ -114,12 +114,12 @@ The evaluation asks 17 questions covering searches, budgets, relative dates, mis
 
 | Engine | Passed | Avg steps | Prompt tokens | Output tokens | Cost per question (no cache) | Time per question |
 |---|---|---|---|---|---|---|
-| Hand-written | 17/17 | 2.3 | 4,874 | 278 | $0.0125 | 3.7s |
+| Custom | 17/17 | 2.3 | 4,874 | 278 | $0.0125 | 3.7s |
 | LangGraph | 17/17 | 2.3 | 4,873 | 277 | $0.0125 | 3.7s |
 
 **What this does and doesn't show:**
 
-- The engines tied, and that's the expected result. They send the same requests to the same model: the LangGraph run read 4,220 of 4,226 prompt tokens from the prompt cache left by the hand-written run, which requires byte-identical request prefixes. A framework's value isn't better answers here.
+- The engines tied, and that's the expected result. They send the same requests to the same model: the LangGraph run read 4,220 of 4,226 prompt tokens from the prompt cache left by the custom run, which requires byte-identical request prefixes. A framework's value isn't better answers here.
 - A perfect score means this set has hit its ceiling. It confirms that these 17 behaviors work, but it can't separate the engines or rank settings. That would take harder questions and more runs.
 - It's a small sample: with 17 runs per engine, pass-rate differences under about 24 points are within normal variation.
 - Caching makes paid cost depend on which engine runs first, so the table shows the cost with no cache discount. With caching, the paid cost was about $0.0065 per question.
@@ -128,7 +128,7 @@ The evaluation asks 17 questions covering searches, budgets, relative dates, mis
 
 Building the same agent twice exposed behavior the framework decides on its own:
 
-| | Hand-written loop | LangGraph | Handled by |
+| | Custom loop | LangGraph | Handled by |
 |---|---|---|---|
 | **Parallel tool calls** | Runs them one at a time | Runs them on separate threads, which lost shortlist entries (3 of 6 saved) | A lock in `langchain_tools.py` |
 | **Step limit** | Counts model calls | Counts graph steps | `recursion_limit = 2 × max_steps` |
@@ -140,7 +140,7 @@ The framework removes the loop, but this project needs a custom trace, cost trac
 
 ## Testing on live data
 
-The Ticketmaster client passed its tests against a hand-written fixture, then failed in ways the fixture couldn't show. Running against the real API found:
+The Ticketmaster client passed its tests against a sample fixture, then failed in ways the fixture couldn't show. Running against the real API found:
 
 | Problem | Effect | Fix |
 |---|---|---|
@@ -155,7 +155,7 @@ Afterward, the agent's answer to *"What concerts are on in Chicago this Saturday
 
 - **Most events have no price.** On that Saturday, 16 of 21 shows had none. The agent says it can't confirm those are under budget, so budget answers can be incomplete.
 - **Results are limited to one page per search.** There's no paging, so the agent has to narrow its search to see later events.
-- **Evaluations don't cover live data.** They always use the offline dataset, so their scores stay comparable, and live checks were done by hand.
+- **Evaluations don't cover live data.** They always use the offline dataset, so their scores stay comparable, and live checks were done manually.
 
 ## Tracing with LangSmith
 
@@ -180,7 +180,7 @@ With tracing on, prompts, tool results, and answers are sent to LangSmith's serv
 
 ```
 src/event_scout/
-  agent.py            the hand-written agent loop
+  agent.py            the custom agent loop
   langgraph_agent.py  the same agent, built with LangGraph
   langchain_tools.py  exposes the tools to LangChain
   tools.py            tool definitions, input validation, and the dispatcher
@@ -203,7 +203,7 @@ tests/                269 offline tests, using fake model clients
 
 ## Design decisions
 
-- **A hand-written loop as the reference.** Frameworks and the SDK's tool runner hide the loop. Writing it out shows exactly what an agent is, and gives the framework version something to be measured against.
+- **A custom loop as the reference.** Frameworks and the SDK's tool runner hide the loop. Writing it out shows exactly what an agent is, and gives the framework version something to be measured against.
 - **One `Event` model behind an `EventSource` interface.** Ticketmaster and the offline data both convert into the same shape, so the agent never knows or cares where events come from.
 - **Pydantic models define each tool's input.** One model generates the JSON Schema Claude sees *and* validates what Claude sends back, so the two can't drift apart.
 - **Tools never raise.** Invalid input, unknown tools, API failures, and bugs all come back to Claude as error results it can read and recover from.
@@ -219,7 +219,7 @@ uv run pytest
 
 269 tests run offline in a few seconds, with no API key. Fake clients replay scripted responses using the SDK's real response types. The LangGraph tests run the real `ChatAnthropic` and `create_agent` code with only the network call replaced, and many tests run one script through both engines and compare the results.
 
-The grader is tested too: a hand-written correct answer for every case must pass on both engines, an empty answer must fail every case, wrong answers must be caught, and correct answers in other formats must not be rejected.
+The grader is tested too: a known-correct answer for every case must pass on both engines, an empty answer must fail every case, wrong answers must be caught, and correct answers in other formats must not be rejected.
 
 **Not yet verified against live services:** Claude Opus 5.5. All live runs used the default, Claude Sonnet 5.5.
 

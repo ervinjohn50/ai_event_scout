@@ -1,7 +1,7 @@
 """Tests for LangSmith tracing. No account or network is used.
 
 A recording client stands in for LangSmith's client and keeps whatever would have been
-uploaded. Hand-written engine tests use the real Anthropic SDK with a fake network layer,
+uploaded. Custom engine tests use the real Anthropic SDK with a fake network layer,
 because `wrap_anthropic` patches the real client.
 """
 
@@ -90,10 +90,10 @@ class Recorder:
         return sorted(children, key=lambda r: r["dotted_order"])
 
 
-def traced_handwritten(responses, registry, bodies=None):
+def traced_custom(responses, registry, bodies=None):
     client = tracing.trace_client(fake_network_client(responses, bodies))
     agent = ScoutAgent(client, tracing.TracedToolRegistry(registry), SYSTEM)
-    return tracing.TracedEngine(agent, "handwritten")
+    return tracing.TracedEngine(agent, "custom")
 
 
 def traced_langgraph(responses, registry):
@@ -166,15 +166,15 @@ def test_configure_warns_and_continues_if_langsmith_is_not_installed(monkeypatch
 # --- What a trace contains ------------------------------------------------------------------
 
 
-def test_handwritten_engine_produces_one_nested_trace(registry):
+def test_custom_engine_produces_one_nested_trace(registry):
     recorder = Recorder()
     with tracing_context(enabled=True, client=recorder.client):
-        reply = traced_handwritten(script(), registry).ask("What's in Austin?")
+        reply = traced_custom(script(), registry).ask("What's in Austin?")
 
     assert reply.text == "Austin has shows."
     root = recorder.root()
     assert root["name"] == "event-scout"
-    assert root["tags"] == ["engine:handwritten"]
+    assert root["tags"] == ["engine:custom"]
     assert [(r["run_type"], r["name"]) for r in recorder.in_order(root)] == [
         ("llm", "ChatAnthropic"),
         ("tool", "search_events"),
@@ -198,13 +198,13 @@ def test_langgraph_engine_produces_one_nested_trace(registry):
 def test_trace_records_the_question_answer_and_settings(registry):
     recorder = Recorder()
     with tracing_context(enabled=True, client=recorder.client):
-        traced_handwritten(script(), registry).ask("What's in Austin?")
+        traced_custom(script(), registry).ask("What's in Austin?")
 
     root = recorder.root()
     assert root["inputs"] == {"user_text": "What's in Austin?"}
     assert root["outputs"] == {"answer": "Austin has shows.", "stop_reason": "end_turn", "steps": 2}
     metadata = root["extra"]["metadata"]
-    assert (metadata["engine"], metadata["model"], metadata["effort"]) == ("handwritten", "claude-sonnet-5-5", "medium")
+    assert (metadata["engine"], metadata["model"], metadata["effort"]) == ("custom", "claude-sonnet-5-5", "medium")
 
 
 def test_tool_runs_record_input_and_errors(registry):
@@ -214,7 +214,7 @@ def test_tool_runs_record_input_and_errors(registry):
         response(text("Not found.")),
     ]
     with tracing_context(enabled=True, client=recorder.client):
-        traced_handwritten(responses, registry).ask("details?")
+        traced_custom(responses, registry).ask("details?")
 
     [tool_run] = recorder.by_type("tool")
     assert tool_run["inputs"] == {"tool_input": {"event_id": "sample-999"}}
@@ -228,7 +228,7 @@ def test_tool_runs_record_input_and_errors(registry):
 def test_tracing_does_not_change_requests_or_replies(registry):
     plain_bodies, traced_bodies = [], []
     plain = ScoutAgent(fake_network_client(script(), plain_bodies), registry, SYSTEM)
-    traced = traced_handwritten(script(), registry, traced_bodies)
+    traced = traced_custom(script(), registry, traced_bodies)
 
     plain_reply = plain.ask("What's in Austin?")
     with tracing_context(enabled=True, client=Recorder().client):
@@ -249,7 +249,7 @@ def test_traced_engine_passes_through_reset_and_config(registry):
     assert traced.export_messages() == []
 
 
-@pytest.mark.parametrize("make_engine", [traced_handwritten, traced_langgraph])
+@pytest.mark.parametrize("make_engine", [traced_custom, traced_langgraph])
 def test_a_langsmith_failure_does_not_break_the_agent(make_engine, registry):
     broken = MagicMock(spec=Client)
     broken.tracing_sampling_rate = None
@@ -296,9 +296,9 @@ def no_network(monkeypatch):
     monkeypatch.setattr(socket.socket, "connect", refuse)
 
 
-@pytest.mark.parametrize("engine", ["handwritten", "langgraph"])
+@pytest.mark.parametrize("engine", ["custom", "langgraph"])
 def test_with_tracing_off_nothing_is_traced_or_sent(engine, isolated_cli, flush_calls, no_network, capsys):
-    kwargs = {"client": FakeClient(script())} if engine == "handwritten" else {"chat_model": scripted_model(script())}
+    kwargs = {"client": FakeClient(script())} if engine == "custom" else {"chat_model": scripted_model(script())}
 
     assert cli.main(["--engine", engine, "--quiet", "What's in Austin?"], **kwargs) == 0
 
@@ -306,11 +306,11 @@ def test_with_tracing_off_nothing_is_traced_or_sent(engine, isolated_cli, flush_
     assert flush_calls == []
 
 
-@pytest.mark.parametrize("engine", ["handwritten", "langgraph"])
+@pytest.mark.parametrize("engine", ["custom", "langgraph"])
 def test_cli_traces_both_engines_when_tracing_is_on(engine, isolated_cli, monkeypatch, flush_calls):
     monkeypatch.setenv("LANGSMITH_TRACING", "true")
     monkeypatch.setenv("LANGSMITH_API_KEY", "fake-key")
-    kwargs = {"client": fake_network_client(script())} if engine == "handwritten" else {"chat_model": scripted_model(script())}
+    kwargs = {"client": fake_network_client(script())} if engine == "custom" else {"chat_model": scripted_model(script())}
     recorder = Recorder()
 
     with tracing_context(enabled=True, client=recorder.client):
@@ -332,7 +332,7 @@ def test_banner_shows_tracing_status(isolated_cli, monkeypatch, flush_calls, cap
 
 
 def test_build_agent_returns_plain_engines_when_tracing_is_off(registry):
-    agent = cli.build_agent("handwritten", registry, SYSTEM, AgentConfig(), None, client=FakeClient([]))
+    agent = cli.build_agent("custom", registry, SYSTEM, AgentConfig(), None, client=FakeClient([]))
     assert isinstance(agent, ScoutAgent)
 
 

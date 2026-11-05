@@ -1,7 +1,7 @@
 """Tests for the LangGraph engine.
 
 Many tests here run one script through BOTH engines and compare the results, because
-the point of the engine is to behave like the hand-written loop. The LangGraph side runs
+the point of the engine is to behave like the custom loop. The LangGraph side runs
 the real ChatAnthropic and create_agent code, with only the network call replaced.
 """
 
@@ -39,7 +39,7 @@ def make_langgraph(responses, registry, **config):
     return LangGraphScoutAgent(model, registry, SYSTEM, agent_config), model
 
 
-def make_handwritten(responses, registry, **config):
+def make_custom(responses, registry, **config):
     client = FakeClient(responses)
     return ScoutAgent(client, registry, SYSTEM, AgentConfig(**config)), client
 
@@ -77,10 +77,10 @@ SCRIPTS = {
 
 @pytest.mark.parametrize("name", SCRIPTS)
 def test_both_engines_give_the_same_reply(name, registry):
-    handwritten, _ = make_handwritten(SCRIPTS[name](), registry)
+    custom, _ = make_custom(SCRIPTS[name](), registry)
     langgraph, _ = make_langgraph(SCRIPTS[name](), registry)
 
-    expected = handwritten.ask("question")
+    expected = custom.ask("question")
     actual = langgraph.ask("question")
 
     assert actual.text == expected.text
@@ -91,9 +91,9 @@ def test_both_engines_give_the_same_reply(name, registry):
 
 @pytest.mark.parametrize("name", ["one tool, then answer", "two tools in one reply", "tool errors, then recovery"])
 def test_both_engines_send_the_same_tool_results_to_claude(name, registry):
-    handwritten, client = make_handwritten(SCRIPTS[name](), registry)
+    custom, client = make_custom(SCRIPTS[name](), registry)
     langgraph, model = make_langgraph(SCRIPTS[name](), registry)
-    handwritten.ask("question")
+    custom.ask("question")
     langgraph.ask("question")
 
     def tool_results(messages):
@@ -108,10 +108,10 @@ def test_step_limit_allows_the_same_number_of_model_calls(registry):
     def endless():
         return [response(tool_use(f"t{i}", "list_shortlist", {}), stop_reason="tool_use") for i in range(10)]
 
-    handwritten, client = make_handwritten(endless(), registry, max_steps=3)
+    custom, client = make_custom(endless(), registry, max_steps=3)
     langgraph, model = make_langgraph(endless(), registry, max_steps=3)
 
-    expected = handwritten.ask("loop forever")
+    expected = custom.ask("loop forever")
     actual = langgraph.ask("loop forever")
 
     assert len(model.requests) == len(client.requests) == 3
@@ -150,7 +150,7 @@ def test_observers_see_the_same_steps_from_both_engines(registry):
 
 def test_observers_get_the_same_message_count_with_parallel_tool_calls(registry):
     """LangChain stores one message per tool result, but the API gets them merged into one."""
-    counts = {"handwritten": [], "langgraph": []}
+    counts = {"custom": [], "langgraph": []}
 
     def recorder(name):
         class Recorder(AgentObserver):
@@ -160,10 +160,10 @@ def test_observers_get_the_same_message_count_with_parallel_tool_calls(registry)
         return Recorder()
 
     script = SCRIPTS["two tools in one reply"]
-    ScoutAgent(FakeClient(script()), registry, SYSTEM, observer=recorder("handwritten")).ask("q")
+    ScoutAgent(FakeClient(script()), registry, SYSTEM, observer=recorder("custom")).ask("q")
     LangGraphScoutAgent(scripted_model(script()), registry, SYSTEM, observer=recorder("langgraph")).ask("q")
 
-    assert counts["langgraph"] == counts["handwritten"] == [1, 3]
+    assert counts["langgraph"] == counts["custom"] == [1, 3]
 
 
 def test_trace_prints_the_same_labels_for_both_engines(registry, capsys):
@@ -184,10 +184,10 @@ def test_trace_prints_the_same_labels_for_both_engines(registry, capsys):
 # --- What's sent to the API -------------------------------------------------------------------
 
 
-def test_request_matches_the_handwritten_engine(registry):
-    handwritten, client = make_handwritten([response(text("Hi"))], registry, effort="low")
+def test_request_matches_the_custom_engine(registry):
+    custom, client = make_custom([response(text("Hi"))], registry, effort="low")
     langgraph, model = make_langgraph([response(text("Hi"))], registry, effort="low")
-    handwritten.ask("hello")
+    custom.ask("hello")
     langgraph.ask("hello")
 
     actual, expected = model.requests[0], client.requests[0]
@@ -268,7 +268,7 @@ def test_parallel_saves_all_reach_the_shortlist(registry):
     assert sorted(e["event_id"] for e in saved["entries"]) == ids
 
 
-def test_langgraph_runs_a_tool_call_from_a_cut_off_reply_unlike_the_handwritten_loop(registry):
+def test_langgraph_runs_a_tool_call_from_a_cut_off_reply_unlike_the_custom_loop(registry):
     """A known difference, recorded here on purpose: LangGraph routes on the presence of
     tool calls and doesn't look at stop_reason. ToolRegistry still validates the input."""
 
@@ -278,10 +278,10 @@ def test_langgraph_runs_a_tool_call_from_a_cut_off_reply_unlike_the_handwritten_
             response(text("Sorry, let me retry.")),
         ]
 
-    handwritten, client = make_handwritten(script(), registry)
+    custom, client = make_custom(script(), registry)
     langgraph, model = make_langgraph(script(), registry)
 
-    assert handwritten.ask("q").stop_reason == "max_tokens"
+    assert custom.ask("q").stop_reason == "max_tokens"
     assert len(client.requests) == 1
 
     assert langgraph.ask("q").stop_reason == "end_turn"
@@ -395,7 +395,7 @@ def test_cli_explains_how_to_install_a_missing_extra(isolated_cli, monkeypatch, 
 def test_langgraph_engine_needs_an_api_key_specifically(isolated_cli):
     assert not cli.has_credentials_for("langgraph", {"ANTHROPIC_AUTH_TOKEN": "tok"})
     assert cli.has_credentials_for("langgraph", {"ANTHROPIC_API_KEY": "sk"})
-    assert cli.has_credentials_for("handwritten", {"ANTHROPIC_AUTH_TOKEN": "tok"})
+    assert cli.has_credentials_for("custom", {"ANTHROPIC_AUTH_TOKEN": "tok"})
 
 
 def test_cli_without_a_key_exits_with_instructions(isolated_cli, capsys):

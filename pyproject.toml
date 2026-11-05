@@ -1,7 +1,7 @@
 [project]
 name = "event-scout"
 version = "0.1.0"
-description = "A concert and event scout agent built on a hand-written Claude tool-use loop."
+description = "A concert and event scout agent built on a custom Claude tool-use loop."
 readme = "README.md"
 authors = [
     { name = "ervinjohn50", email = "71913788+ervinjohn50@users.noreply.github.com" }

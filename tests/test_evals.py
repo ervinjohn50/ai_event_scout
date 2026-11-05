@@ -1,7 +1,7 @@
 """Tests for the eval set. These test the grader, so a live run's numbers can be trusted.
 
 A bad grader produces confident numbers that mean nothing. So every case has a known-good
-answer, written by hand from the sample data, that must pass, and an empty answer that
+answer, written from the sample data, that must pass, and an empty answer that
 must fail. Further tests check that wrong answers are caught, that correct answers aren't
 rejected over formatting, and that plumbing failures aren't counted as wrong answers.
 """
@@ -99,7 +99,7 @@ def oracle_script(case_id):
     return script
 
 
-def handwritten_factory(script):
+def custom_factory(script):
     client = FakeClient(script)
     return lambda tools, prompt, observer: ScoutAgent(client, tools, prompt, observer=observer)
 
@@ -109,10 +109,10 @@ def langgraph_factory(script):
     return lambda tools, prompt, observer: LangGraphScoutAgent(model, tools, prompt, observer=observer)
 
 
-FACTORIES = {"handwritten": handwritten_factory, "langgraph": langgraph_factory}
+FACTORIES = {"custom": custom_factory, "langgraph": langgraph_factory}
 
 
-def run(case_id, script, engine="handwritten", dataset=DATASET):
+def run(case_id, script, engine="custom", dataset=DATASET):
     return evals.run_case(CASES[case_id], dataset, engine, FACTORIES[engine](script))
 
 
@@ -187,7 +187,7 @@ def test_dataset_runs_on_a_pinned_date_regardless_of_today(tmp_path):
 # --- Known-good answers pass, and empty answers fail ------------------------------------------------
 
 
-@pytest.mark.parametrize("engine", ["handwritten", "langgraph"])
+@pytest.mark.parametrize("engine", ["custom", "langgraph"])
 @pytest.mark.parametrize("case_id", ORACLE)
 def test_known_good_answer_passes(case_id, engine):
     record = run(case_id, oracle_script(case_id), engine)
@@ -363,7 +363,7 @@ def client_factory(client):
     ],
 )
 def test_api_error_is_recorded_not_graded(error):
-    record = evals.run_case(CASES["city-search"], DATASET, "handwritten", client_factory(FailingClient(error)))
+    record = evals.run_case(CASES["city-search"], DATASET, "custom", client_factory(FailingClient(error)))
     assert record.status == "error"
     assert "failed" in record.error or "Connection" in record.error
     assert record.checks == []
@@ -452,7 +452,7 @@ def test_langgraph_record_reports_the_served_model():
 
 def test_both_engines_produce_the_same_grades_and_usage_on_one_script():
     for case_id in ORACLE:
-        first = run(case_id, oracle_script(case_id), "handwritten")
+        first = run(case_id, oracle_script(case_id), "custom")
         second = run(case_id, oracle_script(case_id), "langgraph")
         assert [(c.name, c.passed) for c in first.checks] == [(c.name, c.passed) for c in second.checks], case_id
         assert first.usage == second.usage, case_id
@@ -467,7 +467,7 @@ def test_report_shows_each_engine_and_the_noise_level():
     records = [RunRecord(str(i), "e", steps=2, seconds=1.0, usage=usage, checks=[Check("c", i != 0)]) for i in range(16)]
     records.append(RunRecord("x", "e", status="error"))
 
-    report = evals.format_report([evals.summarize("handwritten", records)])
+    report = evals.format_report([evals.summarize("custom", records)])
 
     assert "15/16" in report and "94%" in report
     assert "1 API errors" in report
@@ -509,7 +509,7 @@ def test_upload_dataset_creates_it_only_once():
 
 def test_langsmith_target_returns_grades_and_keeps_records():
     records = []
-    target = evals.langsmith_target(DATASET, "handwritten", handwritten_factory(oracle_script("list-shortlist")), records)
+    target = evals.langsmith_target(DATASET, "custom", custom_factory(oracle_script("list-shortlist")), records)
 
     outputs = target({"case_id": "list-shortlist", "turns": []})
 
@@ -558,7 +558,7 @@ def test_real_langsmith_evaluate_produces_the_scores(monkeypatch):
     )
 
     results = evaluate(
-        evals.langsmith_target(DATASET, "handwritten", handwritten_factory(oracle_script("list-shortlist")), records),
+        evals.langsmith_target(DATASET, "custom", custom_factory(oracle_script("list-shortlist")), records),
         data=[example],
         evaluators=[evals.langsmith_evaluator],
         upload_results=False,
@@ -593,7 +593,7 @@ def full_script(reps=1):
 
 def test_full_run_with_known_good_answers_scores_100_percent(isolated, capsys):
     code = evals.main(
-        [*base_args(isolated), "--engine", "handwritten"],
+        [*base_args(isolated), "--engine", "custom"],
         client=FakeClient(full_script()),
     )
 
@@ -615,7 +615,7 @@ def test_both_engines_run_through_the_command(isolated, capsys):
     out = capsys.readouterr().out
     assert code == 0
     assert out.count(f"{len(CASES)}/{len(CASES)}") == 2
-    assert "handwritten" in out and "langgraph" in out
+    assert "custom" in out and "langgraph" in out
 
 
 def _shared_scripted_model(script):
@@ -636,7 +636,7 @@ def test_engine_order_alternates_so_neither_always_gets_the_warm_cache(isolated,
 
     lines = [line.split() for line in capsys.readouterr().out.splitlines() if line.startswith("  PASS")]
     first_engine_per_case = [lines[i][1] for i in range(0, len(lines), 2)]
-    assert first_engine_per_case == ["handwritten", "langgraph", "handwritten", "langgraph"]
+    assert first_engine_per_case == ["custom", "langgraph", "custom", "langgraph"]
     # Each pair is the same case, and each engine runs every case once.
     assert all(lines[i][2] == lines[i + 1][2] for i in range(0, len(lines), 2))
 
@@ -650,23 +650,23 @@ def test_report_says_how_to_compare_costs_only_for_two_engines(isolated, capsys)
 
 def test_reps_repeat_each_case(isolated, capsys):
     client = FakeClient(full_script(reps=2))
-    assert evals.main([*base_args(isolated), "--engine", "handwritten", "--reps", "2"], client=client) == 0
+    assert evals.main([*base_args(isolated), "--engine", "custom", "--reps", "2"], client=client) == 0
     assert f"{len(CASES) * 2}/{len(CASES) * 2}" in capsys.readouterr().out
 
 
 def test_effort_defaults_to_low_and_can_be_set(isolated):
     client = FakeClient(oracle_script("missing-city"))
-    evals.main([*base_args(isolated), "--engine", "handwritten", "--cases", "missing-city"], client=client)
+    evals.main([*base_args(isolated), "--engine", "custom", "--cases", "missing-city"], client=client)
     assert client.requests[0]["output_config"] == {"effort": "low"}
 
     client = FakeClient(oracle_script("missing-city"))
-    evals.main([*base_args(isolated), "--engine", "handwritten", "--cases", "missing-city", "--effort", "high"], client=client)
+    evals.main([*base_args(isolated), "--engine", "custom", "--cases", "missing-city", "--effort", "high"], client=client)
     assert client.requests[0]["output_config"] == {"effort": "high"}
 
 
 def test_cases_flag_runs_only_those_cases(isolated, capsys):
     client = FakeClient(oracle_script("missing-city"))
-    assert evals.main([*base_args(isolated), "--engine", "handwritten", "--cases", "missing-city"], client=client) == 0
+    assert evals.main([*base_args(isolated), "--engine", "custom", "--cases", "missing-city"], client=client) == 0
     out = capsys.readouterr().out
     assert "missing-city" in out and "city-search" not in out
 
@@ -693,14 +693,14 @@ def test_langsmith_flag_needs_a_key(isolated, capsys):
 
 def test_bad_api_key_stops_the_run_instead_of_repeating_the_failure(isolated, capsys):
     client = FailingClient(api_error(anthropic.AuthenticationError, 401))
-    assert evals.main([*base_args(isolated), "--engine", "handwritten"], client=client) == 1
+    assert evals.main([*base_args(isolated), "--engine", "custom"], client=client) == 1
     err = capsys.readouterr().err
     assert "stopping the eval" in err and "AuthenticationError" in err
 
 
 def test_rate_limit_is_recorded_and_the_run_continues(isolated, capsys):
     client = FailingClient(api_error(anthropic.RateLimitError, 429))
-    assert evals.main([*base_args(isolated), "--engine", "handwritten"], client=client) == 0
+    assert evals.main([*base_args(isolated), "--engine", "custom"], client=client) == 0
     out = capsys.readouterr().out
     assert "ERROR" in out and f"{len(CASES)} API errors" in out
 

@@ -9,7 +9,7 @@ its own validation. That means Claude sees identical tool definitions from both
 engines, and `ToolRegistry.run` stays the only place input is validated.
 
 LangGraph runs the tool calls from one model reply on separate threads, while the
-hand-written loop runs them one at a time. The handlers aren't written for concurrency:
+custom loop runs them one at a time. The handlers aren't written for concurrency:
 two threads saving to the shortlist at once each read the file, add an entry, and write
 it back, so one overwrites the other. A lock makes both engines run tools one at a time.
 """

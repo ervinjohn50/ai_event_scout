@@ -5,7 +5,7 @@ on, prompts, tool results, and answers are sent to LangSmith's servers.
 
 Each engine gets traced differently, without changing either one:
 - LangChain and LangGraph report to LangSmith on their own.
-- The hand-written engine gets a wrapped API client, which traces each model call, and
+- The custom engine gets a wrapped API client, which traces each model call, and
   a wrapped tool registry, which traces each tool call.
 `TracedEngine` then wraps either engine, so all the steps of one question nest under a
 single trace tagged with the engine's name.

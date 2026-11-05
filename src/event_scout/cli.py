@@ -28,7 +28,7 @@ from .tools import ToolRegistry, build_tools
 from .trace import ConsoleTrace
 from .tracing import configure_tracing, flush_traces
 
-ENGINES = ("handwritten", "langgraph")
+ENGINES = ("custom", "langgraph")
 
 
 class Engine(Protocol):
@@ -123,7 +123,7 @@ def build_agent(
     """Create the chosen engine. Both get the same tools, prompt, settings, and observer."""
     agent: Engine
     if engine == "langgraph":
-        # Imported here because LangChain is optional: the handwritten engine must work
+        # Imported here because LangChain is optional: the custom engine must work
         # without it. A missing package raises ImportError, which main() reports.
         from .langgraph_agent import LangGraphScoutAgent, build_chat_model
 
@@ -155,8 +155,8 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--engine",
         choices=ENGINES,
-        default="handwritten",
-        help="which agent loop to run: this project's own, or LangGraph (default: handwritten)",
+        default="custom",
+        help="which agent loop to run: this project's own, or LangGraph (default: custom)",
     )
     parser.add_argument("--model", default=DEFAULT_MODEL, help=f"Claude model id (default: {DEFAULT_MODEL})")
     parser.add_argument(
