@@ -51,7 +51,10 @@ def configure_tracing(env: MutableMapping[str, str] = os.environ) -> bool:
         env["LANGSMITH_TRACING"] = "false"
         print("Warning: tracing needs the langsmith package (uv sync --extra langchain). Tracing is off.", file=sys.stderr)
         return False
-    env.setdefault("LANGSMITH_PROJECT", DEFAULT_PROJECT)
+    # A workspace sends traces either to an agent or to a project. LangSmith doesn't trace
+    # calls when both are set, so the default project applies only if no agent is configured.
+    if not env.get("LANGSMITH_AGENT_ID"):
+        env.setdefault("LANGSMITH_PROJECT", DEFAULT_PROJECT)
     return True
 
 

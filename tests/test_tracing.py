@@ -143,6 +143,18 @@ def test_configure_sets_a_default_project_but_keeps_yours():
     assert env["LANGSMITH_PROJECT"] == "mine"
 
 
+def test_configure_does_not_add_a_project_when_an_agent_is_set():
+    """LangSmith doesn't trace calls when an agent and a project are both set."""
+    env = {
+        "LANGSMITH_TRACING": "true",
+        "LANGSMITH_API_KEY": "k",
+        "LANGSMITH_AGENT_ID": "event-scout",
+        "LANGSMITH_AGENT_ENVIRONMENT": "local",
+    }
+    assert tracing.configure_tracing(env) is True
+    assert "LANGSMITH_PROJECT" not in env
+
+
 def test_configure_warns_and_continues_if_langsmith_is_not_installed(monkeypatch, capsys):
     monkeypatch.setitem(__import__("sys").modules, "langsmith", None)
     env = {"LANGSMITH_TRACING": "true", "LANGSMITH_API_KEY": "k"}
