@@ -3,7 +3,7 @@
 The system prompt is built ONCE when a session starts and never changes during it.
 That matters for two reasons:
 - Prompt caching only works if the start of each request is byte-for-byte identical.
-- Claude Opus 5.5 rejects a conversation whose earlier parts were edited after it
+- Current Claude models reject a conversation whose earlier parts were edited after it
   "thought" about them (this is called preserved thinking). The system prompt counts
   as an earlier part.
 So today's date goes in here once, rather than being recomputed for every request.

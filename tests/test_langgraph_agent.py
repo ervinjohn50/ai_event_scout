@@ -195,7 +195,7 @@ def test_request_matches_the_handwritten_engine(registry):
     assert {k: actual.get(k) for k in keys} == {k: expected.get(k) for k in keys}
     assert actual["betas"] == [FALLBACK_BETA]
     assert actual["messages"] == [{"role": "user", "content": "hello"}]
-    assert not actual.get("tool_choice")  # forced tool use is rejected on Opus 5.5
+    assert not actual.get("tool_choice")  # forced tool use is rejected on current models
     assert "temperature" not in actual  # also rejected
 
 

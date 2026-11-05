@@ -133,7 +133,7 @@ class ScoutAgent:
             "system": self.system_prompt,
             "tools": self.tool_definitions,
             "messages": self.messages,
-            # Claude Opus 5.5 always thinks before it answers. "summarized" asks the API
+            # The model decides how much to think before it answers. "summarized" asks the API
             # to also send back a readable summary of that thinking, which the trace prints.
             "thinking": {"type": "adaptive", "display": "summarized"},
             "output_config": {"effort": self.config.effort},

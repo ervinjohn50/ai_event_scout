@@ -204,7 +204,7 @@ def test_trace_records_the_question_answer_and_settings(registry):
     assert root["inputs"] == {"user_text": "What's in Austin?"}
     assert root["outputs"] == {"answer": "Austin has shows.", "stop_reason": "end_turn", "steps": 2}
     metadata = root["extra"]["metadata"]
-    assert (metadata["engine"], metadata["model"], metadata["effort"]) == ("handwritten", "claude-opus-5-5", "medium")
+    assert (metadata["engine"], metadata["model"], metadata["effort"]) == ("handwritten", "claude-sonnet-5-5", "medium")
 
 
 def test_tool_runs_record_input_and_errors(registry):
@@ -241,7 +241,7 @@ def test_tracing_does_not_change_requests_or_replies(registry):
 
 def test_traced_engine_passes_through_reset_and_config(registry):
     traced = traced_langgraph([response(text("a")), response(text("b"))], registry)
-    assert traced.config.model == "claude-opus-5-5"
+    assert traced.config.model == "claude-sonnet-5-5"
     with tracing_context(enabled=True, client=Recorder().client):
         traced.ask("first")
         assert len(traced.export_messages()) == 2

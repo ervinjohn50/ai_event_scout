@@ -111,10 +111,10 @@ def test_quiet_mode_prints_only_the_answer(capsys):
 
 def test_flags_change_the_request():
     client = FakeClient(answer())
-    cli.main(["--quiet", "--model", "claude-sonnet-5-5", "--effort", "low", "--no-fallbacks", "hi"], client=client)
+    cli.main(["--quiet", "--model", "claude-opus-5-5", "--effort", "low", "--no-fallbacks", "hi"], client=client)
 
     request = client.requests[0]
-    assert request["model"] == "claude-sonnet-5-5"
+    assert request["model"] == "claude-opus-5-5"  # not the default, so this proves the flag works
     assert request["output_config"] == {"effort": "low"}
     assert "fallbacks" not in request
     assert "OFFLINE SAMPLE" in request["system"]
@@ -160,7 +160,7 @@ def test_chat_session_with_commands(monkeypatch, capsys):
     assert cli.main(["--quiet"], client=client) == 0
 
     out = capsys.readouterr().out
-    assert "Event Scout | claude-opus-5-5, effort medium | offline sample data" in out
+    assert "Event Scout | claude-sonnet-5-5, effort medium | offline sample data" in out
     assert "/history" in out  # from /help
     assert "Your shortlist is empty" in out
     assert "Plenty of shows!" in out

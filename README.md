@@ -17,7 +17,7 @@ The agent is built twice: once as a **hand-written tool-use loop** over the Clau
 A live run on Claude Sonnet 5.5 with the offline data:
 
 ```
-$ uv run event-scout --offline --model claude-sonnet-5-5 "Any indie rock in Chicago in the next two weeks under \$50?"
+$ uv run event-scout --offline "Any indie rock in Chicago in the next two weeks under \$50?"
 -- step 1 ------------------------------- sending 1 message
   tool call  search_events {"city": "Chicago", "keyword": "indie rock", "start_date": "2026-11-04",
              "end_date": "2026-11-18", "category": "music"}
@@ -53,7 +53,7 @@ uv run event-scout "What jazz is on in New York this week?"
 ```
 
 - **API key:** create one at [platform.claude.com](https://platform.claude.com/settings/keys).
-- **Cost:** about 1¢ per question on Claude Sonnet 5.5 at low effort, as measured in the evaluation below. The default model, Claude Opus 5.5, has twice the per-token price. Use `--model claude-sonnet-5-5` to spend less.
+- **Cost:** about 1¢ per question at low effort on the default model, Claude Sonnet 5.5, as measured in the evaluation below. Claude Opus 5.5 is available with `--model claude-opus-5-5`, at twice the per-token price.
 - **Live events (optional):** get a free key at [developer.ticketmaster.com](https://developer.ticketmaster.com) and set `TICKETMASTER_API_KEY`. Without it, the app uses the offline data, which covers Chicago, New York, Austin, Los Angeles, Seattle, Toronto, and London.
 - **Smaller install (optional):** the hand-written engine needs only `anthropic` and `pydantic`. `uv sync --no-dev` installs just those, and `uv sync --no-dev --extra langchain` adds the LangChain packages.
 
@@ -74,7 +74,7 @@ On the command line:
 |---|---|---|
 | `--engine {handwritten,langgraph}` | `handwritten` | Which agent loop to run |
 | `--effort {low,medium,high,xhigh,max}` | `medium` | How hard the model thinks: lower is faster and cheaper |
-| `--model MODEL` | `claude-opus-5-5` | Which Claude model to use |
+| `--model MODEL` | `claude-sonnet-5-5` | Which Claude model to use |
 | `--offline` | off | Use the sample data even if a Ticketmaster key is set |
 | `--quiet` / `--verbose` | neither | Hide the trace / show full thinking and tool results |
 | `--max-steps N` | `10` | Most model calls allowed per question |
@@ -105,7 +105,7 @@ The core is [`ScoutAgent.ask`](src/event_scout/agent.py#L82). It sends the whole
 
 ```bash
 uv run event-scout-eval --list                                # see the questions (free)
-uv run event-scout-eval --engine both --model claude-sonnet-5-5
+uv run event-scout-eval --engine both
 ```
 
 The evaluation asks 17 questions covering searches, budgets, relative dates, missing information, follow-ups, cancelled events, cases that shouldn't use tools, and a prompt-injection attempt. Each run uses the offline data on a pinned date with an empty shortlist. Answers are graded by plain code, with no AI judge: expected tools, required text, what ended up in the shortlist, and whether prices, links, and event names came from tool results.
@@ -169,7 +169,7 @@ LANGSMITH_API_KEY=...
 Each question then becomes one nested trace, tagged by engine. Add `--langsmith` to the eval command to record the runs as experiments, with a score for every check:
 
 ```bash
-uv run event-scout-eval --engine both --model claude-sonnet-5-5 --langsmith
+uv run event-scout-eval --engine both --langsmith
 ```
 
 Experiments run one engine at a time, so the engine that runs second gets more cache hits. Compare the no-cache cost when using this flag.
@@ -221,7 +221,7 @@ uv run pytest
 
 The grader is tested too: a hand-written correct answer for every case must pass on both engines, an empty answer must fail every case, wrong answers must be caught, and correct answers in other formats must not be rejected.
 
-**Not yet verified against live services:** all live runs used Claude Sonnet 5.5, not the default Claude Opus 5.5.
+**Not yet verified against live services:** Claude Opus 5.5. All live runs used the default, Claude Sonnet 5.5.
 
 ## Roadmap
 

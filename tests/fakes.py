@@ -42,7 +42,7 @@ def response(
             "id": "msg_fake",
             "type": "message",
             "role": "assistant",
-            "model": "claude-opus-5-5",
+            "model": "claude-sonnet-5-5",
             "content": list(blocks),
             "stop_reason": stop_reason,
             "stop_sequence": None,

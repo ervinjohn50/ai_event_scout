@@ -400,7 +400,7 @@ def test_summary_keeps_ungraded_runs_out_of_the_pass_rate():
     assert (summary.errors, summary.cut_off, summary.refused) == (1, 1, 1)
     assert summary.avg_steps == 3  # the failed API call doesn't drag down the averages
     assert summary.avg_seconds == 2
-    assert summary.avg_cost == pytest.approx(usage.cost(PRICING["claude-opus-5-5"]))
+    assert summary.avg_cost == pytest.approx(usage.cost(PRICING["claude-sonnet-5-5"]))
 
 
 def test_no_cache_cost_is_the_same_however_many_tokens_came_from_the_cache():
@@ -442,12 +442,12 @@ def test_setup_prefills_the_shortlist():
 def test_record_keeps_the_full_conversation_and_served_model():
     record = run("city-search", oracle_script("city-search"))
     assert [m["role"] for m in record.transcript] == ["user", "assistant", "user", "assistant"]
-    assert record.served_models == ["claude-opus-5-5"]
+    assert record.served_models == ["claude-sonnet-5-5"]
     assert record.usage.requests == 2
 
 
 def test_langgraph_record_reports_the_served_model():
-    assert run("city-search", oracle_script("city-search"), "langgraph").served_models == ["claude-opus-5-5"]
+    assert run("city-search", oracle_script("city-search"), "langgraph").served_models == ["claude-sonnet-5-5"]
 
 
 def test_both_engines_produce_the_same_grades_and_usage_on_one_script():

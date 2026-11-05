@@ -135,7 +135,7 @@ def test_request_contains_model_settings_tools_and_system_prompt(tools):
     agent.ask("hello")
 
     request = client.requests[0]
-    assert request["model"] == "claude-opus-5-5"
+    assert request["model"] == "claude-sonnet-5-5"
     assert request["system"] == SYSTEM
     assert request["tools"] == tools.definitions()
     assert request["thinking"] == {"type": "adaptive", "display": "summarized"}
@@ -144,7 +144,7 @@ def test_request_contains_model_settings_tools_and_system_prompt(tools):
     assert request["cache_control"] == {"type": "ephemeral"}
     assert request["betas"] == [FALLBACK_BETA]
     assert request["fallbacks"] == "default"
-    assert "tool_choice" not in request  # forcing a tool call is rejected on Opus 5.5
+    assert "tool_choice" not in request  # forcing a tool call is rejected on current models
 
 
 def test_fallbacks_can_be_turned_off(tools):
