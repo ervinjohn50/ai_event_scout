@@ -15,6 +15,7 @@ dependencies = [
 [project.scripts]
 event-scout = "event_scout.cli:main"
 event-scout-eval = "event_scout.evals:main"
+event-scout-api = "event_scout.server:main"
 
 [project.optional-dependencies]
 langchain = [
@@ -23,6 +24,10 @@ langchain = [
     "langgraph>=1.2.19",
     "langsmith>=0.14.17",
 ]
+web = [
+    "fastapi>=0.162.0",
+    "uvicorn>=0.54.0",
+]
 
 [build-system]
 requires = ["uv_build>=0.11.23,<0.12.0"]
@@ -30,11 +35,14 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "fastapi>=0.162.0",
+    "httpx>=0.28.1",
     "langchain>=1.4.9",
     "langchain-anthropic>=1.7.10",
     "langgraph>=1.2.19",
     "langsmith>=0.14.17",
     "pytest>=9.2.0",
+    "uvicorn>=0.54.0",
 ]
 
 [tool.pytest.ini_options]

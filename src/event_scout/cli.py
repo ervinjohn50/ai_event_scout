@@ -247,32 +247,40 @@ def print_banner(config: AgentConfig, source: EventSource, engine: str, tracing:
 
 
 def ask_and_print(agent: Engine, trace: ConsoleTrace | None, question: str) -> bool:
-    """Run one question through the agent and print the answer. Returns False on failure.
-
-    API errors are caught most-specific first, so each gets a message that says what
-    to do about it. All of them are subclasses of APIStatusError, except connection errors.
-    """
+    """Run one question through the agent and print the answer. Returns False on failure."""
     try:
         reply = agent.ask(question)
-    except anthropic.AuthenticationError:
-        return _fail("The API key was rejected. Check ANTHROPIC_API_KEY.")
-    except anthropic.PermissionDeniedError:
-        return _fail("This API key doesn't have access to that model or feature.")
-    except anthropic.NotFoundError:
-        return _fail(f"Model '{agent.config.model}' wasn't found. Check the --model value.")
-    except anthropic.RateLimitError:
-        return _fail("Rate limited by the API. Wait a minute and try again.")
-    except anthropic.BadRequestError as err:
-        return _fail(f"The API rejected the request: {err.message}\n(If this repeats, type /reset.)")
-    except anthropic.APIStatusError as err:
-        return _fail(f"The API returned an error (HTTP {err.status_code}). Try again shortly.")
-    except anthropic.APIConnectionError:
-        return _fail("Couldn't reach the Claude API. Check your internet connection.")
+    except anthropic.APIError as err:
+        hint = "\n(If this repeats, type /reset.)" if isinstance(err, anthropic.BadRequestError) else ""
+        return _fail(describe_api_error(err, agent.config.model) + hint)
 
     if trace:
         trace.print_turn_summary(reply.steps, reply.usage)
     print(f"\n{reply.text}")
     return True
+
+
+def describe_api_error(err: anthropic.APIError, model: str) -> str:
+    """Say what went wrong and what to do about it. The CLI and the web API share these.
+
+    Checked most-specific first. All of these are subclasses of APIStatusError, except
+    connection errors.
+    """
+    if isinstance(err, anthropic.AuthenticationError):
+        return "The API key was rejected. Check ANTHROPIC_API_KEY."
+    if isinstance(err, anthropic.PermissionDeniedError):
+        return "This API key doesn't have access to that model or feature."
+    if isinstance(err, anthropic.NotFoundError):
+        return f"Model '{model}' wasn't found. Check the model setting."
+    if isinstance(err, anthropic.RateLimitError):
+        return "Rate limited by the API. Wait a minute and try again."
+    if isinstance(err, anthropic.BadRequestError):
+        return f"The API rejected the request: {err.message}"
+    if isinstance(err, anthropic.APIStatusError):
+        return f"The API returned an error (HTTP {err.status_code}). Try again shortly."
+    if isinstance(err, anthropic.APIConnectionError):
+        return "Couldn't reach the Claude API. Check your internet connection."
+    return f"The API call failed: {err}"
 
 
 def _fail(message: str) -> bool:

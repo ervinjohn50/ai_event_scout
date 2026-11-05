@@ -57,6 +57,14 @@ uv run event-scout "What jazz is on in New York this week?"
 - **Live events (optional):** get a free key at [developer.ticketmaster.com](https://developer.ticketmaster.com) and set `TICKETMASTER_API_KEY`. Without it, the app uses the offline data, which covers Chicago, New York, Austin, Los Angeles, Seattle, Toronto, and London.
 - **Smaller install (optional):** the custom engine needs only `anthropic` and `pydantic`. `uv sync --no-dev` installs just those, and `uv sync --no-dev --extra langchain` adds the LangChain packages.
 
+## Web API
+
+```bash
+uv run event-scout-api --offline
+```
+
+This starts the API at `http://127.0.0.1:8000`, with interactive documentation at `/docs`. It has no login, so it only accepts connections from your own computer. Questions sent to `POST /api/chat` call Claude and cost the same as in the terminal.
+
 ## Commands and options
 
 In the chat:
@@ -189,10 +197,13 @@ src/event_scout/
   tracing.py          optional LangSmith tracing
   trace.py            prints each step of the loop
   cli.py              terminal chat, commands, and flags
+  api.py              web API: chat, shortlist, stats, and health endpoints
+  server.py           starts the web API
   config.py           model, effort, limits, and prices
   usage.py            token counting and cost estimates
   db.py               the SQLite database: connections, schema, transactions
   shortlist.py        saved events, stored in SQLite
+  runs.py             per-question measurements and the stats query
   events/
     models.py         the normalized Event model
     base.py           the EventSource interface every data source implements

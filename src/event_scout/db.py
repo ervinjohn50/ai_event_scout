@@ -19,7 +19,7 @@ BUSY_TIMEOUT_SECONDS = 30
 
 # Increase this whenever SCHEMA changes. SQLite stores the number inside the database
 # file, so the app can tell whether a file matches this code.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA = [
     """
@@ -34,6 +34,26 @@ SCHEMA = [
         source     TEXT NOT NULL,
         note       TEXT,
         saved_at   TEXT NOT NULL
+    )
+    """,
+    # One row per question asked through the web API. It holds measurements only, not the
+    # question or the answer, so usage reports don't keep what anyone asked.
+    """
+    CREATE TABLE IF NOT EXISTS question_runs (
+        id                 INTEGER PRIMARY KEY,
+        session_id         TEXT NOT NULL,
+        engine             TEXT NOT NULL,
+        model              TEXT NOT NULL,
+        stop_reason        TEXT NOT NULL,
+        steps              INTEGER NOT NULL,
+        tool_calls         INTEGER NOT NULL,
+        input_tokens       INTEGER NOT NULL,
+        cache_read_tokens  INTEGER NOT NULL,
+        cache_write_tokens INTEGER NOT NULL,
+        output_tokens      INTEGER NOT NULL,
+        cost_usd           REAL,
+        seconds            REAL NOT NULL,
+        created_at         TEXT NOT NULL
     )
     """,
 ]

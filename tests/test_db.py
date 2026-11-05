@@ -42,6 +42,28 @@ def test_connecting_creates_the_folder_tables_and_version(path):
     assert version == SCHEMA_VERSION
 
 
+def test_an_older_database_gets_the_new_tables_and_keeps_its_data(path):
+    path.parent.mkdir(parents=True)
+    old = sqlite3.connect(path)
+    old.execute(
+        """
+        CREATE TABLE shortlist (
+            event_id TEXT PRIMARY KEY, name TEXT NOT NULL, date TEXT NOT NULL, venue TEXT, city TEXT, price TEXT,
+            ticket_url TEXT, source TEXT NOT NULL, note TEXT, saved_at TEXT NOT NULL
+        )
+        """
+    )
+    old.execute("INSERT INTO shortlist (event_id, name, date, source, saved_at) VALUES ('kept', 'Show', 'TBA', 'sample', 'then')")
+    old.execute("PRAGMA user_version = 1")
+    old.commit()
+    old.close()
+
+    assert [entry["event_id"] for entry in ShortlistStore(path).all()] == ["kept"]
+    with connect(path) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM question_runs").fetchone()[0] == 0
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+
+
 def test_a_transaction_that_fails_saves_nothing(path, store):
     with pytest.raises(RuntimeError):
         with transaction(path) as connection:
