@@ -1,0 +1,234 @@
+.chat {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+.engine {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.engine select,
+.newChat {
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.newChat {
+  margin-left: auto;
+  cursor: pointer;
+}
+
+.newChat:hover:not(:disabled) {
+  background: var(--surface-muted);
+}
+
+.newChat:disabled,
+.engine select:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.status::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: 1px;
+}
+
+.banner,
+.error {
+  padding: 10px 12px;
+  border: 1px solid var(--danger-border);
+  border-radius: 8px;
+  background: var(--danger-surface);
+  color: var(--danger-text);
+  font-size: 0.9375rem;
+}
+
+.banner {
+  margin: 12px 0 0;
+}
+
+.error {
+  margin: 0;
+}
+
+.messages {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 18px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px 2px;
+}
+
+.welcome {
+  margin: auto 0;
+  padding: 16px 0;
+}
+
+.welcome h2 {
+  margin: 0 0 6px;
+  font-size: 1.5rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.welcome p {
+  margin: 0 0 18px;
+  color: var(--text-muted);
+}
+
+.examples {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.examples button {
+  padding: 8px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.9375rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.examples button:hover {
+  border-color: var(--accent);
+}
+
+.user {
+  align-self: flex-end;
+  max-width: 85%;
+  padding: 9px 13px;
+  border-radius: 14px 14px 3px 14px;
+  background: var(--accent);
+  color: var(--on-accent);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.assistant {
+  max-width: 100%;
+}
+
+.notice {
+  margin: 10px 0 0;
+  color: var(--warning-text);
+  font-size: 0.875rem;
+  font-weight: 550;
+}
+
+.meta {
+  margin-top: 8px;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+}
+
+.meta summary {
+  cursor: pointer;
+}
+
+.meta ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.stepFailed {
+  color: var(--danger-text);
+}
+
+.working {
+  margin: 0;
+  color: var(--text-muted);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .working {
+    animation: none;
+  }
+}
+
+.composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 12px 0 16px;
+  border-top: 1px solid var(--border);
+}
+
+.composer textarea {
+  flex: 1;
+  min-width: 0;
+  max-height: 160px;
+  padding: 9px 11px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  resize: vertical;
+}
+
+.composer textarea:focus,
+.engine select:focus-visible,
+.newChat:focus-visible,
+.composer button:focus-visible,
+.examples button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.composer button {
+  min-height: 42px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.composer button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}

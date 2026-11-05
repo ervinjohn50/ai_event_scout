@@ -57,13 +57,19 @@ uv run event-scout "What jazz is on in New York this week?"
 - **Live events (optional):** get a free key at [developer.ticketmaster.com](https://developer.ticketmaster.com) and set `TICKETMASTER_API_KEY`. Without it, the app uses the offline data, which covers Chicago, New York, Austin, Los Angeles, Seattle, Toronto, and London.
 - **Smaller install (optional):** the custom engine needs only `anthropic` and `pydantic`. `uv sync --no-dev` installs just those, and `uv sync --no-dev --extra langchain` adds the LangChain packages.
 
-## Web API
+## Web app
+
+You also need [Node.js](https://nodejs.org). Install the front end once, then start everything with one command:
 
 ```bash
-uv run event-scout-api --offline
+cd web
+npm install
+npm run dev
 ```
 
-This starts the API at `http://127.0.0.1:8000`, with interactive documentation at `/docs`. It has no login, so it only accepts connections from your own computer. Questions sent to `POST /api/chat` call Claude and cost the same as in the terminal.
+This starts the Next.js page at `http://127.0.0.1:3000` and the FastAPI backend at `http://127.0.0.1:8000`, with interactive API documentation at `/docs`. Ctrl-C stops both. To use the offline event data, run `npm run dev:offline` instead.
+
+The app has no login, so both servers only accept connections from your own computer. Questions cost the same as in the terminal.
 
 ## Commands and options
 
@@ -209,6 +215,7 @@ src/event_scout/
     base.py           the EventSource interface every data source implements
     ticketmaster.py   Ticketmaster Discovery API client
     sample.py         offline source over sample_events.json (fictional events)
+web/                  Next.js and TypeScript chat page
 evals/dataset.json    the evaluation questions and expectations
 tests/                269 offline tests, using fake model clients
 ```

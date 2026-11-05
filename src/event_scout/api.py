@@ -321,7 +321,7 @@ def create_app(
 
     @app.post("/api/chat")
     def chat(request: ChatRequest) -> ChatResponse:
-        """Ask a question. Any error response means the conversation has ended."""
+        """Ask a question. A question that fails ends its conversation, so start a new one."""
         if request.session_id is None:
             session = start_session(request.engine or "custom")
         else:
