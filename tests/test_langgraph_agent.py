@@ -148,6 +148,24 @@ def test_observers_see_the_same_steps_from_both_engines(registry):
     assert normalized(second.events) == normalized(first.events)
 
 
+def test_observers_get_the_same_message_count_with_parallel_tool_calls(registry):
+    """LangChain stores one message per tool result, but the API gets them merged into one."""
+    counts = {"handwritten": [], "langgraph": []}
+
+    def recorder(name):
+        class Recorder(AgentObserver):
+            def on_model_call(self, step, messages):
+                counts[name].append(len(messages))
+
+        return Recorder()
+
+    script = SCRIPTS["two tools in one reply"]
+    ScoutAgent(FakeClient(script()), registry, SYSTEM, observer=recorder("handwritten")).ask("q")
+    LangGraphScoutAgent(scripted_model(script()), registry, SYSTEM, observer=recorder("langgraph")).ask("q")
+
+    assert counts["langgraph"] == counts["handwritten"] == [1, 3]
+
+
 def test_trace_prints_the_same_labels_for_both_engines(registry, capsys):
     from event_scout.trace import ConsoleTrace
 

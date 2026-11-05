@@ -81,7 +81,7 @@ class LangGraphScoutAgent:
         # tool run is two steps, so this allows exactly max_steps model calls.
         run_config = {"recursion_limit": 2 * self.config.max_steps}
 
-        self.observer.on_model_call(step, self.messages)
+        self.observer.on_model_call(step, self.export_messages())
         try:
             # "updates" yields each node's new messages as soon as that node finishes.
             for update in self.graph.stream(
@@ -109,7 +109,7 @@ class LangGraphScoutAgent:
                             # model call only starts once all of them are in.
                             if not pending_tool_calls and step < self.config.max_steps:
                                 step += 1
-                                self.observer.on_model_call(step, self.messages)
+                                self.observer.on_model_call(step, self.export_messages())
         except GraphRecursionError:
             return AgentReply(
                 f"(Stopped after {self.config.max_steps} steps without a final answer. "

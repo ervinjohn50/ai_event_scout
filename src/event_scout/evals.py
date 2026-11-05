@@ -12,6 +12,9 @@ How the results stay trustworthy:
   than the path (which calls were made), so any valid approach can pass.
 - API errors, cut-off replies, and refusals are counted separately from the pass rate.
   They aren't evidence that an answer was wrong.
+- Both engines send identical requests, so whichever runs second reuses the first one's
+  prompt cache and looks cheaper and faster. The order alternates per case to balance
+  that, and the report adds a cost that ignores the cache, for comparing engines.
 - Each run's full conversation is saved to evals/results/ so a surprising grade can be
   checked by reading what actually happened.
 
@@ -339,7 +342,8 @@ class Summary:
     avg_steps: float
     avg_prompt_tokens: float
     avg_output_tokens: float
-    avg_cost: float | None
+    avg_cost: float | None  # what was actually paid, which depends on cache hits
+    avg_no_cache_cost: float | None  # the same tokens at full price, for comparing engines
     avg_seconds: float
 
     @property
@@ -357,6 +361,11 @@ def summarize(engine: str, records: list[RunRecord], model: str = DEFAULT_MODEL)
         return mean(values) if values else 0.0
 
     costs = [r.usage.cost(pricing) for r in completed]
+    no_cache_costs = [
+        (r.usage.prompt_tokens * pricing.input + r.usage.output_tokens * pricing.output) / 1_000_000
+        for r in completed
+        if pricing
+    ]
     return Summary(
         engine=engine,
         runs=len(records),
@@ -369,19 +378,27 @@ def summarize(engine: str, records: list[RunRecord], model: str = DEFAULT_MODEL)
         avg_prompt_tokens=average([r.usage.prompt_tokens for r in completed]),
         avg_output_tokens=average([r.usage.output_tokens for r in completed]),
         avg_cost=average(costs) if pricing else None,
+        avg_no_cache_cost=average(no_cache_costs) if pricing else None,
         avg_seconds=average([r.seconds for r in completed]),
     )
 
 
 def format_report(summaries: list[Summary]) -> str:
-    header = f"{'Engine':<13}{'Passed':>9}{'Rate':>7}{'Steps':>7}{'Prompt tok':>12}{'Output tok':>12}{'Cost/q':>9}{'Time/q':>8}"
+    header = (
+        f"{'Engine':<13}{'Passed':>9}{'Rate':>7}{'Steps':>7}{'Prompt tok':>12}{'Output tok':>12}"
+        f"{'Paid/q':>9}{'No-cache/q':>12}{'Time/q':>8}"
+    )
     lines = [header, "-" * len(header)]
+
+    def dollars(value: float | None) -> str:
+        return f"${value:.4f}" if value is not None else "n/a"
+
     for s in summaries:
         rate = f"{s.pass_rate:.0%}" if s.pass_rate is not None else "n/a"
-        cost = f"${s.avg_cost:.4f}" if s.avg_cost is not None else "n/a"
         lines.append(
             f"{s.engine:<13}{f'{s.passed}/{s.graded}':>9}{rate:>7}{s.avg_steps:>7.1f}"
-            f"{s.avg_prompt_tokens:>12,.0f}{s.avg_output_tokens:>12,.0f}{cost:>9}{f'{s.avg_seconds:.1f}s':>8}"
+            f"{s.avg_prompt_tokens:>12,.0f}{s.avg_output_tokens:>12,.0f}"
+            f"{dollars(s.avg_cost):>9}{dollars(s.avg_no_cache_cost):>12}{f'{s.avg_seconds:.1f}s':>8}"
         )
     for s in summaries:
         if s.errors or s.cut_off or s.refused:
@@ -394,6 +411,11 @@ def format_report(summaries: list[Summary]) -> str:
             f"\nWith {graded} graded runs per engine, pass-rate differences under about "
             f"{100 / graded**0.5:.0f} points are within normal run-to-run variation. Use --reps for more precision."
         )
+    if len(summaries) > 1:
+        lines.append(
+            "The engines share a prompt cache, so Paid/q and Time/q depend on run order. "
+            "Compare engines with No-cache/q."
+        )
     return "\n".join(lines)
 
 
@@ -401,7 +423,7 @@ def format_run(record: RunRecord, model: str = DEFAULT_MODEL) -> str:
     label = {"ok": "PASS" if record.passed else "FAIL"}.get(record.status, record.status.upper())
     cost = record.usage.cost(PRICING.get(model))
     cost_text = f"  ${cost:.4f}" if cost is not None else ""
-    lines = [f"  {label:<8}{record.case_id:<30}{record.steps:>2} steps  {record.seconds:>5.1f}s{cost_text}"]
+    lines = [f"  {label:<8}{record.engine:<13}{record.case_id:<30}{record.steps:>2} steps  {record.seconds:>5.1f}s{cost_text}"]
     if record.error:
         lines.append(f"            {record.error}")
     for check in record.checks:
@@ -550,24 +572,23 @@ def main(argv: list[str] | None = None, client: Any = None, chat_model_factory: 
 
         return make_engine
 
-    all_records: list[RunRecord] = []
-    summaries: list[Summary] = []
+    records_by_engine: dict[str, list[RunRecord]] = {engine: [] for engine in engines}
     try:
-        for engine in engines:
-            print(f"\n{engine}")
-            if args.langsmith:
-                records = run_langsmith_experiment(dataset, engine, factory_for(engine), config, args.reps)
-                for record in records:
+        if args.langsmith:
+            # LangSmith runs each experiment as a whole, so the order can't alternate here.
+            for engine in engines:
+                records_by_engine[engine] = run_langsmith_experiment(dataset, engine, factory_for(engine), config, args.reps)
+                for record in records_by_engine[engine]:
                     print(format_run(record, config.model), flush=True)
-            else:
-                records = []
-                for rep in range(1, args.reps + 1):
-                    for case in dataset.cases:
+        else:
+            for rep in range(1, args.reps + 1):
+                for index, case in enumerate(dataset.cases):
+                    # Alternate who goes first, so neither engine always gets the warm cache.
+                    order = engines if (index + rep) % 2 else list(reversed(engines))
+                    for engine in order:
                         record = run_case(case, dataset, engine, factory_for(engine), rep)
-                        records.append(record)
+                        records_by_engine[engine].append(record)
                         print(format_run(record, config.model), flush=True)
-            all_records += records
-            summaries.append(summarize(engine, records, config.model))
     except ImportError:
         print(LANGCHAIN_MISSING_TEXT, file=sys.stderr)
         return 2
@@ -578,6 +599,8 @@ def main(argv: list[str] | None = None, client: Any = None, chat_model_factory: 
         if tracing:
             flush_traces()
 
+    all_records = [record for records in records_by_engine.values() for record in records]
+    summaries = [summarize(engine, records, config.model) for engine, records in records_by_engine.items()]
     path = save_results(all_records, dataset.version(), args.results_dir)
     print(f"\n{format_report(summaries)}\n\nFull conversations: {path}")
     return 0

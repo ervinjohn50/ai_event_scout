@@ -403,6 +403,26 @@ def test_summary_keeps_ungraded_runs_out_of_the_pass_rate():
     assert summary.avg_cost == pytest.approx(usage.cost(PRICING["claude-opus-5-5"]))
 
 
+def test_no_cache_cost_is_the_same_however_many_tokens_came_from_the_cache():
+    """This is what makes engines comparable: the same work costs the same here."""
+    cold = TokenUsage(input_tokens=4000, output_tokens=100, requests=2)
+    warm = TokenUsage(input_tokens=100, cache_read_tokens=3900, output_tokens=100, requests=2)
+    model = "claude-sonnet-5-5"
+
+    cold_summary = evals.summarize("a", [RunRecord("x", "a", usage=cold, checks=[Check("c", True)])], model)
+    warm_summary = evals.summarize("b", [RunRecord("x", "b", usage=warm, checks=[Check("c", True)])], model)
+
+    assert cold_summary.avg_no_cache_cost == warm_summary.avg_no_cache_cost == pytest.approx(0.009)
+    assert warm_summary.avg_cost < cold_summary.avg_cost
+
+
+def test_unknown_model_has_no_cost():
+    usage = TokenUsage(input_tokens=10, output_tokens=10, requests=1)
+    summary = evals.summarize("a", [RunRecord("x", "a", usage=usage, checks=[Check("c", True)])], "unknown-model")
+    assert summary.avg_cost is None and summary.avg_no_cache_cost is None
+    assert "n/a" in evals.format_report([summary])
+
+
 def test_a_run_with_no_checks_is_not_a_pass_when_ungraded():
     assert not RunRecord("a", "e", status="error").passed
 
@@ -601,6 +621,31 @@ def test_both_engines_run_through_the_command(isolated, capsys):
 def _shared_scripted_model(script):
     model = scripted_model(script)
     return lambda: model
+
+
+def test_engine_order_alternates_so_neither_always_gets_the_warm_cache(isolated, capsys):
+    cases = "missing-city,uncovered-city,list-shortlist,no-tools-needed"  # the dataset's order
+    ids = cases.split(",")
+    script = lambda: [r for case_id in ids for r in oracle_script(case_id)]  # noqa: E731
+
+    evals.main(
+        [*base_args(isolated), "--engine", "both", "--cases", cases],
+        client=FakeClient(script()),
+        chat_model_factory=_shared_scripted_model(script()),
+    )
+
+    lines = [line.split() for line in capsys.readouterr().out.splitlines() if line.startswith("  PASS")]
+    first_engine_per_case = [lines[i][1] for i in range(0, len(lines), 2)]
+    assert first_engine_per_case == ["handwritten", "langgraph", "handwritten", "langgraph"]
+    # Each pair is the same case, and each engine runs every case once.
+    assert all(lines[i][2] == lines[i + 1][2] for i in range(0, len(lines), 2))
+
+
+def test_report_says_how_to_compare_costs_only_for_two_engines(isolated, capsys):
+    usage = TokenUsage(input_tokens=10, output_tokens=10, requests=1)
+    one = evals.summarize("a", [RunRecord("x", "a", usage=usage, checks=[Check("c", True)])])
+    assert "No-cache/q." not in evals.format_report([one])
+    assert "Compare engines with No-cache/q." in evals.format_report([one, one])
 
 
 def test_reps_repeat_each_case(isolated, capsys):
