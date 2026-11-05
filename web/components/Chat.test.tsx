@@ -1,10 +1,15 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render as renderInDom, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ChatResponse, Health } from "@/lib/api";
 
 import { Chat } from "./Chat";
+import { ChatProvider } from "./ChatProvider";
+
+function render(ui: React.ReactElement, healthRetryMs?: number) {
+  return renderInDom(<ChatProvider healthRetryMs={healthRetryMs}>{ui}</ChatProvider>);
+}
 
 const HEALTH: Health = {
   status: "ok",
@@ -254,10 +259,51 @@ describe("Chat", () => {
 
   it("clears the warning once a slow-starting server is ready", async () => {
     stubServer([], [new Response("Internal Server Error", { status: 500 }), json(HEALTH)]);
-    render(<Chat healthRetryMs={1} />);
+    render(<Chat />, 1);
 
     expect(await screen.findByText("Sample data")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  describe("moving between pages", () => {
+    // The page comes and goes while the provider, which lives in the layout, stays mounted.
+    function App({ showChat }: { showChat: boolean }) {
+      return <ChatProvider>{showChat ? <Chat /> : <p>Another page</p>}</ChatProvider>;
+    }
+
+    it("keeps the conversation and the unsent text", async () => {
+      const fetchMock = stubServer([json(reply()), json(reply({ answer: "Second." }))]);
+      const { rerender } = renderInDom(<App showChat />);
+      await ask(user, "first");
+      await screen.findByText("Here's what I found.");
+      await user.type(screen.getByLabelText("Your message"), "half typed");
+
+      rerender(<App showChat={false} />);
+      expect(screen.queryByText("Here's what I found.")).not.toBeInTheDocument();
+      rerender(<App showChat />);
+
+      expect(screen.getByText("Here's what I found.")).toBeInTheDocument();
+      expect(screen.getByLabelText("Your message")).toHaveValue("half typed");
+
+      await user.click(screen.getByRole("button", { name: "Send" }));
+      await screen.findByText("Second.");
+      expect(chatBodies(fetchMock)[1].session_id).toBe("session-1");
+    });
+
+    it("finishes a question that was still in progress", async () => {
+      let finish!: (response: Response) => void;
+      stubServer([new Promise<Response>((resolve) => (finish = resolve))]);
+      const { rerender } = renderInDom(<App showChat />);
+      await ask(user);
+
+      rerender(<App showChat={false} />);
+      finish(json(reply()));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      rerender(<App showChat />);
+
+      expect(await screen.findByText("Here's what I found.")).toBeInTheDocument();
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    });
   });
 
   it("an example fills the box but doesn't send, because sending costs money", async () => {

@@ -1,31 +1,14 @@
 "use client";
 
-import { type FormEvent, type KeyboardEvent, useEffect, useRef, useState } from "react";
+import { type FormEvent, type KeyboardEvent, useEffect, useRef } from "react";
 
-import {
-  ApiError,
-  type ChatResponse,
-  type EngineName,
-  endConversation,
-  getHealth,
-  type Health,
-  MAX_MESSAGE_LENGTH,
-  sendMessage,
-} from "@/lib/api";
+import { type ChatResponse, type EngineName, MAX_MESSAGE_LENGTH } from "@/lib/api";
+import { ENGINE_LABELS } from "@/lib/format";
 import { describeStep, formatCost, stopNotice } from "@/lib/steps";
 
 import { Answer } from "./Answer";
 import styles from "./Chat.module.css";
-
-type ChatItem =
-  | { id: number; kind: "user"; text: string }
-  | { id: number; kind: "assistant"; reply: ChatResponse }
-  | { id: number; kind: "error"; text: string };
-
-const ENGINE_LABELS: Record<EngineName, string> = {
-  custom: "Custom loop",
-  langgraph: "LangGraph",
-};
+import { useChat } from "./ChatProvider";
 
 const EXAMPLES = [
   "What concerts are on in Chicago this weekend?",
@@ -33,98 +16,33 @@ const EXAMPLES = [
   "Show me what's on my shortlist.",
 ];
 
-const HEALTH_RETRY_MS = 3000;
-
-export function Chat({ healthRetryMs = HEALTH_RETRY_MS }: { healthRetryMs?: number }) {
-  const [items, setItems] = useState<ChatItem[]>([]);
-  const [draft, setDraft] = useState("");
-  const [engine, setEngine] = useState<EngineName>("custom");
-  const [sessionId, setSessionId] = useState<string | null>(null);
-  const [sending, setSending] = useState(false);
-  const [health, setHealth] = useState<Health | null>(null);
-  const [healthError, setHealthError] = useState<string | null>(null);
-  const nextId = useRef(1);
+export function Chat() {
+  const { items, draft, setDraft, engine, sending, health, healthError, send, startNewChat } = useChat();
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    // FastAPI can take a moment longer to start than this page, so a failed check is retried
-    // until it succeeds. Otherwise the warning would stay up after the server is ready.
-    const controller = new AbortController();
-    let retry: ReturnType<typeof setTimeout> | undefined;
-    function check() {
-      getHealth(controller.signal).then(
-        (result) => {
-          setHealth(result);
-          setHealthError(null);
-        },
-        (err: unknown) => {
-          if (!(err instanceof ApiError)) return; // the check was cancelled
-          setHealthError(err.message);
-          retry = setTimeout(check, healthRetryMs);
-        },
-      );
-    }
-    check();
-    return () => {
-      controller.abort();
-      clearTimeout(retry);
-    };
-  }, [healthRetryMs]);
 
   useEffect(() => {
     endRef.current?.scrollIntoView?.({ behavior: "smooth", block: "end" });
   }, [items, sending]);
 
-  function addItem(item: Omit<Extract<ChatItem, { kind: "user" }>, "id"> | Omit<Extract<ChatItem, { kind: "assistant" }>, "id"> | Omit<Extract<ChatItem, { kind: "error" }>, "id">) {
-    const id = nextId.current++;
-    setItems((current) => [...current, { ...item, id } as ChatItem]);
-  }
-
-  function startNewChat(nextEngine: EngineName = engine) {
-    // Freeing the conversation on the server is only tidying up. If this fails, the server
-    // drops it later anyway, so there's nothing to tell the user.
-    if (sessionId) endConversation(sessionId).catch(() => {});
-    setSessionId(null);
-    setItems([]);
-    setEngine(nextEngine);
+  function focusInput() {
     inputRef.current?.focus();
   }
 
-  async function send() {
-    const message = draft.trim();
-    if (!message || sending) return;
-
-    addItem({ kind: "user", text: message });
-    setDraft("");
-    setSending(true);
-    try {
-      const reply = await sendMessage(message, { sessionId, engine });
-      setSessionId(reply.session_id);
-      addItem({ kind: "assistant", reply });
-    } catch (err) {
-      // A failed question ends its conversation on the server, so the next message starts a
-      // new one. The text goes back in the box, so it can be sent again.
-      setSessionId(null);
-      setDraft(message);
-      const reason = err instanceof ApiError ? err.message : "Something went wrong.";
-      addItem({ kind: "error", text: `${reason} Your next message starts a new conversation.` });
-    } finally {
-      setSending(false);
-      inputRef.current?.focus();
-    }
+  function submit() {
+    void send().finally(focusInput);
   }
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
-    void send();
+    submit();
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     // isComposing is true while typing with an input method, where Enter confirms a word.
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
-      void send();
+      submit();
     }
   }
 
@@ -139,7 +57,10 @@ export function Chat({ healthRetryMs = HEALTH_RETRY_MS }: { healthRetryMs?: numb
             value={engine}
             disabled={sending}
             title="Changing the engine starts a new chat"
-            onChange={(event) => startNewChat(event.target.value as EngineName)}
+            onChange={(event) => {
+              startNewChat(event.target.value as EngineName);
+              focusInput();
+            }}
           >
             {(Object.keys(ENGINE_LABELS) as EngineName[]).map((name) => (
               <option key={name} value={name} disabled={health ? !health.available_engines.includes(name) : false}>
@@ -153,7 +74,15 @@ export function Chat({ healthRetryMs = HEALTH_RETRY_MS }: { healthRetryMs?: numb
             {health.data_source === "ticketmaster" ? "Live Ticketmaster data" : "Sample data"}
           </span>
         )}
-        <button type="button" className={styles.newChat} disabled={sending || empty} onClick={() => startNewChat()}>
+        <button
+          type="button"
+          className={styles.newChat}
+          disabled={sending || empty}
+          onClick={() => {
+            startNewChat();
+            focusInput();
+          }}
+        >
           New chat
         </button>
       </div>
@@ -176,7 +105,7 @@ export function Chat({ healthRetryMs = HEALTH_RETRY_MS }: { healthRetryMs?: numb
                   type="button"
                   onClick={() => {
                     setDraft(example);
-                    inputRef.current?.focus();
+                    focusInput();
                   }}
                 >
                   {example}

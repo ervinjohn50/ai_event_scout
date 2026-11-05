@@ -38,6 +38,39 @@ export interface Health {
   tracing: boolean;
 }
 
+export interface ShortlistEntry {
+  event_id: string;
+  name: string;
+  date: string;
+  venue: string | null;
+  city: string | null;
+  price: string | null;
+  ticket_url: string | null;
+  source: string;
+  note: string | null;
+  saved_at: string;
+}
+
+export interface ShortlistResponse {
+  entries: ShortlistEntry[];
+}
+
+export interface EngineStats {
+  engine: string;
+  questions: number;
+  errors: number;
+  avg_steps: number | null;
+  avg_tool_calls: number | null;
+  avg_seconds: number | null;
+  avg_prompt_tokens: number | null;
+  avg_output_tokens: number | null;
+  total_cost_usd: number;
+}
+
+export interface StatsResponse {
+  engines: EngineStats[];
+}
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -96,4 +129,16 @@ export function sendMessage(
 
 export function endConversation(sessionId: string): Promise<void> {
   return request<void>(`/api/chat/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
+}
+
+export function getShortlist(signal?: AbortSignal): Promise<ShortlistResponse> {
+  return request<ShortlistResponse>("/api/shortlist", { signal });
+}
+
+export function removeFromShortlist(eventId: string): Promise<void> {
+  return request<void>(`/api/shortlist/${encodeURIComponent(eventId)}`, { method: "DELETE" });
+}
+
+export function getStats(signal?: AbortSignal): Promise<StatsResponse> {
+  return request<StatsResponse>("/api/stats", { signal });
 }

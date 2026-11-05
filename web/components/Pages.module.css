@@ -1,0 +1,165 @@
+.page {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 18px 2px 24px;
+}
+
+.heading {
+  margin: 0 0 16px;
+  font-size: 1.375rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.empty {
+  color: var(--text-muted);
+}
+
+.page a {
+  color: var(--accent-text);
+}
+
+.errorBox {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--danger-border);
+  border-radius: 8px;
+  background: var(--danger-surface);
+  color: var(--danger-text);
+  font-size: 0.9375rem;
+}
+
+.errorBox p {
+  margin: 0 0 8px;
+}
+
+.page button {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.page button:hover:not(:disabled) {
+  background: var(--surface-muted);
+}
+
+.page button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.page button:focus-visible,
+.page a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.card {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.cardBody {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.card h3 {
+  margin: 0;
+  font-size: 1.0625rem;
+  font-weight: 650;
+}
+
+.cardMeta {
+  margin: 3px 0 0;
+  color: var(--text-muted);
+  font-size: 0.9375rem;
+}
+
+.note {
+  margin: 8px 0 0;
+  padding-left: 10px;
+  border-left: 2px solid var(--accent);
+  font-size: 0.9375rem;
+}
+
+.card a {
+  display: inline-block;
+  margin-top: 8px;
+  font-size: 0.9375rem;
+}
+
+.card button {
+  flex-shrink: 0;
+}
+
+.tableWrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9375rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.table th,
+.table td {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.table tbody tr:last-child th,
+.table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.table thead th {
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+  font-weight: 550;
+  white-space: normal;
+  vertical-align: bottom;
+}
+
+.table th:first-child {
+  position: sticky;
+  left: 0;
+  background: var(--surface);
+  font-weight: 600;
+  text-align: left;
+}
+
+.footnote {
+  margin: 12px 0 0;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+}

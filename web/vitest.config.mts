@@ -6,6 +6,8 @@ export default defineConfig({
   resolve: { tsconfigPaths: true },
   test: {
     environment: "jsdom",
+    // A zone west of UTC, so date bugs show up on any computer.
+    env: { TZ: "America/Chicago" },
     setupFiles: ["./vitest.setup.ts"],
   },
 });

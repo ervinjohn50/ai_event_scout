@@ -69,6 +69,8 @@ npm run dev
 
 This starts the Next.js page at `http://127.0.0.1:3000` and the FastAPI backend at `http://127.0.0.1:8000`, with interactive API documentation at `/docs`. Ctrl-C stops both. To use the offline event data, run `npm run dev:offline` instead.
 
+The chat page shows the tool calls behind each answer, the shortlist page lists and removes saved events, and the stats page compares the engines with a SQL `GROUP BY` report. Reloading the browser clears the chat on screen, while saved events and stats stay in the database.
+
 The app has no login, so both servers only accept connections from your own computer. Questions cost the same as in the terminal.
 
 ## Commands and options
@@ -215,7 +217,7 @@ src/event_scout/
     base.py           the EventSource interface every data source implements
     ticketmaster.py   Ticketmaster Discovery API client
     sample.py         offline source over sample_events.json (fictional events)
-web/                  Next.js and TypeScript chat page
+web/                  Next.js and TypeScript front end: chat, shortlist, and stats pages
 evals/dataset.json    the evaluation questions and expectations
 tests/                269 offline tests, using fake model clients
 ```

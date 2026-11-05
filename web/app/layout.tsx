@@ -1,5 +1,8 @@
 import type { Metadata } from "next";
 
+import { ChatProvider } from "@/components/ChatProvider";
+import { Nav } from "@/components/Nav";
+
 import "./globals.css";
 import styles from "./layout.module.css";
 
@@ -15,8 +18,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <div className={styles.shell}>
           <header className={styles.header}>
             <h1 className={styles.title}>Event Scout</h1>
+            <Nav />
           </header>
-          <main className={styles.main}>{children}</main>
+          <main className={styles.main}>
+            <ChatProvider>{children}</ChatProvider>
+          </main>
         </div>
       </body>
     </html>

@@ -9,7 +9,12 @@
 }
 
 .header {
-  padding-top: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 12px;
+  padding-top: 12px;
 }
 
 .title {
