@@ -138,6 +138,25 @@ Building the same agent twice exposed behavior the framework decides on its own:
 
 The framework removes the loop, but this project needs a custom trace, cost tracking, and identical behavior across engines, and that takes translation code. A plain LangGraph agent without those needs far less.
 
+## Testing on live data
+
+The Ticketmaster client passed its tests against a hand-written fixture, then failed in ways the fixture couldn't show. Running against the real API found:
+
+| Problem | Effect | Fix |
+|---|---|---|
+| **Date filters were in UTC** | A search for Saturday in Chicago returned 20 events, 19 of them from Friday, and missed 22 Saturday shows | Filter on the venue's local time: 21 of 21 on the right day |
+| **No default start date** | A search with no dates returned an event from 2022 | Default to today |
+| **Placeholder prices** | Events with no price set showed as `0 USD`, which reads as free | Treat 0-to-0 ranges as unknown |
+| **Result pages fill up fast** | A search over two weeks can match 169 events, and one page shows the earliest 25 at most | Tell the model the page is partial, so it can say so or narrow the search |
+
+Afterward, the agent's answer to *"What concerts are on in Chicago this Saturday under $50?"* matched the source data exactly on both engines: all five priced shows, correct prices, and the cancelled show flagged.
+
+**Known limits with live data:**
+
+- **Most events have no price.** On that Saturday, 16 of 21 shows had none. The agent says it can't confirm those are under budget, so budget answers can be incomplete.
+- **Results are limited to one page per search.** There's no paging, so the agent has to narrow its search to see later events.
+- **Evaluations don't cover live data.** They always use the offline dataset, so their scores stay comparable, and live checks were done by hand.
+
 ## Tracing with LangSmith
 
 Tracing is optional and off by default. To turn it on, add your settings from [smith.langchain.com](https://smith.langchain.com) to `.env`, as shown in `.env.example`:
@@ -179,7 +198,7 @@ src/event_scout/
     ticketmaster.py   Ticketmaster Discovery API client
     sample.py         offline source over sample_events.json (fictional events)
 evals/dataset.json    the evaluation questions and expectations
-tests/                265 offline tests, using fake model clients
+tests/                269 offline tests, using fake model clients
 ```
 
 ## Design decisions
@@ -198,13 +217,11 @@ tests/                265 offline tests, using fake model clients
 uv run pytest
 ```
 
-265 tests run offline in a few seconds, with no API key. Fake clients replay scripted responses using the SDK's real response types. The LangGraph tests run the real `ChatAnthropic` and `create_agent` code with only the network call replaced, and many tests run one script through both engines and compare the results.
+269 tests run offline in a few seconds, with no API key. Fake clients replay scripted responses using the SDK's real response types. The LangGraph tests run the real `ChatAnthropic` and `create_agent` code with only the network call replaced, and many tests run one script through both engines and compare the results.
 
 The grader is tested too: a hand-written correct answer for every case must pass on both engines, an empty answer must fail every case, wrong answers must be caught, and correct answers in other formats must not be rejected.
 
-**Not yet verified against live services:**
-- The Ticketmaster client is tested only against a hand-written fixture modeled on the API's documented response, not the live API.
-- The live evaluation ran on Claude Sonnet 5.5, not the default Claude Opus 5.5.
+**Not yet verified against live services:** all live runs used Claude Sonnet 5.5, not the default Claude Opus 5.5.
 
 ## Roadmap
 
