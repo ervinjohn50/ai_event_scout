@@ -114,15 +114,15 @@ The evaluation asks 17 questions covering searches, budgets, relative dates, mis
 
 | Engine | Passed | Avg steps | Prompt tokens | Output tokens | Cost per question (no cache) | Time per question |
 |---|---|---|---|---|---|---|
-| Hand-written | 17/17 | 2.3 | 4,827 | 268 | $0.0123 | 3.6s |
-| LangGraph | 17/17 | 2.3 | 4,827 | 269 | $0.0123 | 3.6s |
+| Hand-written | 17/17 | 2.3 | 4,874 | 278 | $0.0125 | 3.7s |
+| LangGraph | 17/17 | 2.3 | 4,873 | 277 | $0.0125 | 3.7s |
 
 **What this does and doesn't show:**
 
 - The engines tied, and that's the expected result. They send the same requests to the same model: the LangGraph run read 4,220 of 4,226 prompt tokens from the prompt cache left by the hand-written run, which requires byte-identical request prefixes. A framework's value isn't better answers here.
 - A perfect score means this set has hit its ceiling. It confirms that these 17 behaviors work, but it can't separate the engines or rank settings. That would take harder questions and more runs.
 - It's a small sample: with 17 runs per engine, pass-rate differences under about 24 points are within normal variation.
-- Caching makes paid cost depend on which engine runs first, so the table shows the cost with no cache discount. With caching, the paid cost was about $0.006 per question.
+- Caching makes paid cost depend on which engine runs first, so the table shows the cost with no cache discount. With caching, the paid cost was about $0.0065 per question.
 
 ### Where the engines differ
 
