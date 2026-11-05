@@ -458,7 +458,7 @@ def create_app(
     return app
 
 
-_CONVERSATION_GONE = "That conversation has ended. Start a new one."
+_CONVERSATION_GONE = "That conversation has ended."
 _FAILED = "Something went wrong answering that."
 
 

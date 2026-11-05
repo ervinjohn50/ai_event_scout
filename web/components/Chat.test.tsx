@@ -374,6 +374,21 @@ describe("Chat", () => {
     });
   });
 
+  it("updates the data source after a restart ends the conversation", async () => {
+    stubServer(
+      [streamed(reply()), json({ detail: "That conversation has ended." }, 404)],
+      [json(HEALTH), json({ ...HEALTH, data_source: "ticketmaster" })],
+    );
+    render(<Chat />);
+    await screen.findByText("Sample data");
+    await ask(user, "first");
+    await screen.findByText("Here's what I found.");
+    await ask(user, "second");
+
+    expect(await screen.findByText("Live Ticketmaster data")).toBeInTheDocument();
+    expect(screen.queryByText("Sample data")).not.toBeInTheDocument();
+  });
+
   it("clears the warning once a slow-starting server is ready", async () => {
     stubServer([], [new Response("Internal Server Error", { status: 500 }), json(HEALTH)]);
     render(<Chat />, 1);

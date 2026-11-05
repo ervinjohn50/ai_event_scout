@@ -92,6 +92,18 @@ export function ChatProvider({
     };
   }, [healthRetryMs]);
 
+  function refreshHealth() {
+    // The server may have restarted in a different mode, such as live data instead of sample
+    // data. A failure here doesn't matter, because the next question will report it.
+    getHealth().then(
+      (result) => {
+        setHealth(result);
+        setHealthError(null);
+      },
+      () => {},
+    );
+  }
+
   function addItem(item: NewChatItem) {
     const id = nextId.current++;
     setItems((current) => [...current, { ...item, id }]);
@@ -104,6 +116,7 @@ export function ChatProvider({
     setSessionId(null);
     setItems([]);
     setEngine(nextEngine);
+    refreshHealth();
   }
 
   function handleProgress(event: ProgressEvent) {
@@ -135,6 +148,7 @@ export function ChatProvider({
       setDraft(message);
       const reason = err instanceof ApiError ? err.message : "Something went wrong.";
       addItem({ kind: "error", text: `${reason} Your next message starts a new conversation.` });
+      refreshHealth();
     } finally {
       setSending(false);
       setLiveSteps([]);

@@ -1,6 +1,6 @@
 # Event Scout
 
-A terminal agent that finds concerts and live events. Ask a question in plain English, and it decides which tools to call, runs them, reads the results, and answers.
+An agent that finds concerts and live events, from the terminal or a web app. Ask a question in plain English, and it decides which tools to call, runs them, reads the results, and answers.
 
 The agent is built twice: once as a **custom tool-use loop** over the Claude API, and once with **LangChain and LangGraph**. Both share the same tools and prompt, are traced with **LangSmith**, and are scored on the same evaluation set. The custom loop keeps every part of how an agent works visible; the second engine shows what a framework takes on and what it hides.
 
@@ -8,9 +8,12 @@ The agent is built twice: once as a **custom tool-use loop** over the Claude API
 
 - Understands requests like *"Any indie rock in Chicago in the next two weeks under $50?"*, including relative dates and budgets.
 - Chooses its own tools: search events, get event details, save to a shortlist, list the shortlist.
-- **Shows its work**: every step prints the model's reasoning summary when there is one, each tool call and result, and token usage with an estimated cost.
+- **Shows its work**: the terminal prints the model's reasoning summary when there is one, each tool call and result, and token usage with an estimated cost. The web app shows each tool call as it happens.
 - Runs on a bundled offline dataset of fictional events, or on the [Ticketmaster Discovery API](https://developer.ticketmaster.com/products-and-docs/apis/discovery-api/v2/) when a key is set.
-- Keeps a shortlist of saved events between sessions.
+- Keeps a shortlist of saved events between sessions in a SQLite database.
+- Reports usage per engine, with a SQL query behind the stats page.
+
+![The Event Scout web app answering a question with live Ticketmaster data](docs/web-app.jpg)
 
 ## Example
 
@@ -69,9 +72,15 @@ npm run dev
 
 This starts the Next.js page at `http://127.0.0.1:3000` and the FastAPI backend at `http://127.0.0.1:8000`, with interactive API documentation at `/docs`. Ctrl-C stops both. To use the offline event data, run `npm run dev:offline` instead.
 
-The chat page shows each tool call as the agent makes it, the shortlist page lists and removes saved events, and the stats page compares the engines with a SQL `GROUP BY` report. Reloading the browser clears the chat on screen, while saved events and stats stay in the database.
+| Page | What it does |
+|---|---|
+| **Chat** | Asks questions on either engine, and shows each tool call as the agent makes it |
+| **Shortlist** | Lists saved events, and removes them without calling the model |
+| **Stats** | Compares the engines' questions, errors, steps, tokens, time, and estimated cost |
 
-The app has no login, so both servers only accept connections from your own computer. Questions cost the same as in the terminal.
+Reloading the browser clears the chat on screen, while saved events and stats stay in the database. Restarting the server also ends conversations in progress.
+
+The app has no login, so both servers only accept connections from your own computer. Questions cost the same as in the terminal, and with LangSmith tracing on, they're uploaded the same way.
 
 ## Commands and options
 
@@ -101,14 +110,21 @@ On the command line:
 ```mermaid
 flowchart LR
     U([You]) <--> CLI[cli.py<br/>chat + commands]
+    U <--> W[web/<br/>Next.js + TypeScript]
+    W <-->|JSON + live events| API[api.py<br/>FastAPI]
     CLI --> A[agent.py<br/>custom loop]
     CLI --> G[langgraph_agent.py<br/>LangGraph]
+    API --> A
+    API --> G
+    API --> R[runs.py<br/>usage stats]
+    R --> D[(SQLite)]
     A <-->|messages + tool definitions| C[(Claude API)]
     G <-->|same requests| C
     A --> T[tools.py<br/>validate + run]
     G --> T
     T --> S[EventSource<br/>Ticketmaster or sample]
-    T --> L[shortlist.py<br/>SQLite database]
+    T --> L[shortlist.py<br/>saved events]
+    L --> D
     A -.-> O[LangSmith<br/>optional]
     G -.-> O
 ```
@@ -116,6 +132,8 @@ flowchart LR
 The core is [`ScoutAgent.ask`](src/event_scout/agent.py#L82). It sends the whole conversation to Claude, and Claude either answers or asks for tools to be run. When it asks for tools, the loop runs them, appends the results to the conversation, and sends it again. This repeats until Claude says it's done (`stop_reason == "end_turn"`) or a step limit is hit. Run `/history` after any question to see the exact messages sent to the API.
 
 [`LangGraphScoutAgent`](src/event_scout/langgraph_agent.py) runs the same cycle through LangChain's `create_agent`, as a graph with a model node and a tools node. Both engines use the same tool definitions, system prompt, and request settings.
+
+The web app adds a layer around the engines without changing them. [`POST /api/chat/stream`](src/event_scout/api.py) runs the agent in a worker thread, because it blocks until it's done. The observer hooks that the terminal trace uses put each step on a queue, and the server sends them to the browser as Server-Sent Events. Only tool names and inputs are sent, and the agent still finishes if the browser disconnects, because stopping partway could leave the conversation's history incomplete.
 
 ## Comparing the engines
 
@@ -173,6 +191,22 @@ Afterward, the agent's answer to *"What concerts are on in Chicago this Saturday
 - **Results are limited to one page per search.** There's no paging, so the agent has to narrow its search to see later events.
 - **Evaluations don't cover live data.** They always use the offline dataset, so their scores stay comparable, and live checks were done manually.
 
+### The web app
+
+The full app was run in a browser on Claude Sonnet 5.5 at low effort, with six questions costing about 6¢ in total: a question and a follow-up on each engine with the offline data, then the same live Ticketmaster question on each engine. Follow-up questions, saving, removing, stats, and LangSmith traces all worked on both engines, and saved events and stats survived a server restart. The live answers matched a direct check of the Ticketmaster results.
+
+Other problems only showed up outside unit tests:
+
+| Problem | Effect | Fix |
+|---|---|---|
+| **Next.js listens on all network addresses by default** | Other devices on the network could have reached the API through it | Listen on `127.0.0.1` only |
+| **The forwarding request hides the original host name** | FastAPI's host check couldn't stop a malicious site that points its domain at this computer | Next.js checks the host name too |
+| **Forwarded requests time out after 30 seconds by default** | Slow questions would have failed, and fast fake replies in tests would never show it | Raise the limit to 5 minutes |
+| **The page could load before FastAPI was ready** | An error stayed on screen after the server came up | Keep checking until it responds |
+| **Parsing dates with `new Date("2026-11-10")`** | Would show the previous day in the Americas | Read the date's parts in the local time zone, with tests pinned to Chicago time |
+
+Live updates were also timed through a stand-in backend with fake delays, to confirm they arrive as they happen. They did, both directly from FastAPI and through Next.js in development and production modes.
+
 ## Tracing with LangSmith
 
 Tracing is optional and off by default. To turn it on, add your settings from [smith.langchain.com](https://smith.langchain.com) to `.env`, as shown in `.env.example`:
@@ -217,9 +251,12 @@ src/event_scout/
     base.py           the EventSource interface every data source implements
     ticketmaster.py   Ticketmaster Discovery API client
     sample.py         offline source over sample_events.json (fictional events)
-web/                  Next.js and TypeScript front end: chat, shortlist, and stats pages
+web/
+  app/                the Next.js pages
+  components/         chat, shortlist, stats, and the provider that keeps a chat across pages
+  lib/                typed API calls, the stream reader, and formatting
 evals/dataset.json    the evaluation questions and expectations
-tests/                269 offline tests, using fake model clients
+tests/                offline Python tests, using fake model clients
 ```
 
 ## Design decisions
@@ -230,7 +267,11 @@ tests/                269 offline tests, using fake model clients
 - **Tools never raise.** Invalid input, unknown tools, API failures, and bugs all come back to Claude as error results it can read and recover from.
 - **Append-only history, fixed per-session prompt.** The conversation is never edited, and the system prompt and tool list never change mid-session. That keeps prompt caching working and satisfies the API's check that earlier reasoning wasn't tampered with.
 - **Small tool results.** Search returns compact summaries; details are a separate tool. Everything in the conversation is re-sent on every step, so smaller results mean faster, cheaper steps.
-- **An observer for output.** The loop never prints. It calls hooks that the trace (or a test) implements, and tracing wraps the engine from outside, so `agent.py` doesn't know about either.
+- **An observer for output.** The loop never prints. It calls hooks that the trace, a test, or the web API implements, and tracing wraps the engine from outside, so `agent.py` doesn't know about any of them.
+- **SQLite with plain SQL.** One user doesn't need a database server, and writing the queries by hand keeps them visible. `INSERT ... ON CONFLICT` inside a transaction lets the database handle simultaneous saves, even from separate programs, which the original JSON file couldn't do: with four programs saving 25 events each, the JSON file kept 34 at most, while SQLite kept all 100.
+- **Conversations in server memory, one lock each.** The two engines store history differently, and a single-user app doesn't need chats to survive a restart. The lock stops two requests from breaking the pairing of tool calls and results.
+- **Answers are untrusted.** They can repeat text from outside sources, so HTML shows as text, images are removed because loading one sends a request to any address, and only normal web links work.
+- **Local only, for now.** Without a login, a public link would let anyone spend the API credit. The servers refuse other host names, and requests not marked as JSON, so a website you visit can't use them either.
 
 ## Testing
 
@@ -238,9 +279,16 @@ tests/                269 offline tests, using fake model clients
 uv run pytest
 ```
 
-269 tests run offline in a few seconds, with no API key. Fake clients replay scripted responses using the SDK's real response types. The LangGraph tests run the real `ChatAnthropic` and `create_agent` code with only the network call replaced, and many tests run one script through both engines and compare the results.
+346 Python tests run offline in a few seconds, with no API key. Fake clients replay scripted responses using the SDK's real response types. The LangGraph tests run the real `ChatAnthropic` and `create_agent` code with only the network call replaced, and many tests run one script through both engines and compare the results.
 
 The grader is tested too: a known-correct answer for every case must pass on both engines, an empty answer must fail every case, wrong answers must be caught, and correct answers in other formats must not be rejected.
+
+The front end has 101 tests of its own, which run offline with `fetch` mocked:
+
+```bash
+cd web
+npm test
+```
 
 **Not yet verified against live services:** Claude Opus 5.5. All live runs used the default, Claude Sonnet 5.5.
 
@@ -248,8 +296,9 @@ The grader is tested too: a known-correct answer for every case must pass on bot
 
 - Harder evaluation questions that can separate engines and settings
 - Stream responses token by token
-- A small web UI
 - Run multiple tool calls concurrently
+- Public deployment, with a login, spending limits, and Postgres
+- Generate the TypeScript types from FastAPI's API schema, so they can't drift apart
 
 ## Notes
 
