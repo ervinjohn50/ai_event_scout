@@ -2,37 +2,38 @@
 
 A terminal agent that finds concerts and live events. Ask a question in plain English, and it decides which tools to call, runs them, reads the results, and answers.
 
-It's built on a **hand-written tool-use loop** over the Claude API, with no agent framework, so every part of how an AI agent works is visible in code you can read in one sitting.
+The agent is built twice: once as a **hand-written tool-use loop** over the Claude API, and once with **LangChain and LangGraph**. Both share the same tools and prompt, are traced with **LangSmith**, and are scored on the same evaluation set. The hand-written loop keeps every part of how an agent works visible; the second engine shows what a framework takes on and what it hides.
 
 ## What it does
 
-- Understands requests like *"Any indie rock in Chicago in the next two weeks under $60?"*, including relative dates and budgets.
+- Understands requests like *"Any indie rock in Chicago in the next two weeks under $50?"*, including relative dates and budgets.
 - Chooses its own tools: search events, get event details, save to a shortlist, list the shortlist.
-- **Shows its work**: every step prints the model's reasoning summary, each tool call and result, and token usage with an estimated cost.
-- Uses real events from the [Ticketmaster Discovery API](https://developer.ticketmaster.com/products-and-docs/apis/discovery-api/v2/), or a bundled offline dataset when no Ticketmaster key is set.
+- **Shows its work**: every step prints the model's reasoning summary when there is one, each tool call and result, and token usage with an estimated cost.
+- Runs on a bundled offline dataset of fictional events, or on the [Ticketmaster Discovery API](https://developer.ticketmaster.com/products-and-docs/apis/discovery-api/v2/) when a key is set.
 - Keeps a shortlist of saved events between sessions.
 
 ## Example
 
-What the step-by-step trace looks like. This output comes from the offline test harness (a scripted fake Claude); a live run prints the same format.
+A live run on Claude Sonnet 5.5 with the offline data:
 
 ```
-you> Any indie rock in Chicago in the next two weeks under $60?
+$ uv run event-scout --offline --model claude-sonnet-5-5 "Any indie rock in Chicago in the next two weeks under \$50?"
 -- step 1 ------------------------------- sending 1 message
-  thinking   The user wants indie rock in Chicago in the next two weeks, under $60. Today is Nov 3,
-             so the window ends Nov 17.
-  tool call  search_events {"keyword": "indie rock", "city": "Chicago", "start_date": "2026-11-03",
-             "end_date": "2026-11-17"}
-  usage      stop_reason=tool_use | prompt 2,140 (0 cached) | output 180 | ~$0.0122
+  tool call  search_events {"city": "Chicago", "keyword": "indie rock", "start_date": "2026-11-04",
+             "end_date": "2026-11-18", "category": "music"}
+  usage      stop_reason=tool_use | prompt 1,916 (0 cached) | output 153 | ~$0.0063
   result     ok, 501 chars: {"count": 2, "events": [{"id": "sample-001", "name": "Velvet Static with
-             Kestrel Moon", "date": "2026-11-06", "time": "20:00", "venue": "The Lantern Room", ...
+             Kestrel Moon", "date": "2026-11-07", "time": "20:00", "venue": "The Lantern Room", ...
 -- step 2 ------------------------------ sending 3 messages
-  thinking   Two shows. Velvet Static is $25-40, under budget. Marigold Engine is $55-75, which goes
-             over $60.
-  usage      stop_reason=end_turn | prompt 2,690 (2,140 cached) | output 210 | ~$0.0068
--- done in 2 steps: 4,830 prompt tokens (2,140 cached), 390 output tokens, ~$0.0190
+  usage      stop_reason=end_turn | prompt 2,310 (1,912 cached) | output 212 | ~$0.0035
+-- done in 2 steps: 4,226 prompt tokens (1,912 cached), 365 output tokens, ~$0.0098
 
-Velvet Static with Kestrel Moon, Fri Nov 6, 8pm, The Lantern Room, $25-40 ...
+Only one of the two indie rock shows in Chicago over the next two weeks (Nov 4–18) is under $50:
+
+- Velvet Static with Kestrel Moon: Saturday, Nov 7, 8:00 PM at The Lantern Room, Chicago. Tickets are $25–40 and on sale.
+
+The other show costs more than your limit:
+- Marigold Engine: Late Bloom Tour: Friday, Nov 13, 8:30 PM at Halsted Ballroom, Chicago. Tickets are $55–75.
 ```
 
 ## Quick start
@@ -40,7 +41,7 @@ Velvet Static with Kestrel Moon, Fri Nov 6, 8pm, The Lantern Room, $25-40 ...
 You need Python 3.12+ and [uv](https://docs.astral.sh/uv/).
 
 ```bash
-uv sync                    # install dependencies into .venv
+uv sync                    # install everything, including the LangChain packages and test tools
 cp .env.example .env       # then put your ANTHROPIC_API_KEY in .env
 uv run event-scout         # start chatting
 ```
@@ -51,8 +52,10 @@ Ask a single question and exit:
 uv run event-scout "What jazz is on in New York this week?"
 ```
 
-- **API key:** create one at [platform.claude.com](https://platform.claude.com/settings/keys). A typical question costs about 1 to 3 cents with the default model.
-- **Live events (optional):** get a free key at [developer.ticketmaster.com](https://developer.ticketmaster.com) and set `TICKETMASTER_API_KEY` in `.env`. Without it, the app uses the offline sample data, which covers Chicago, New York, Austin, Los Angeles, Seattle, Toronto, and London.
+- **API key:** create one at [platform.claude.com](https://platform.claude.com/settings/keys).
+- **Cost:** about 1¢ per question on Claude Sonnet 5.5 at low effort, as measured in the evaluation below. The default model, Claude Opus 5.5, has twice the per-token price. Use `--model claude-sonnet-5-5` to spend less.
+- **Live events (optional):** get a free key at [developer.ticketmaster.com](https://developer.ticketmaster.com) and set `TICKETMASTER_API_KEY`. Without it, the app uses the offline data, which covers Chicago, New York, Austin, Los Angeles, Seattle, Toronto, and London.
+- **Smaller install (optional):** the hand-written engine needs only `anthropic` and `pydantic`. `uv sync --no-dev` installs just those, and `uv sync --no-dev --extra langchain` adds the LangChain packages.
 
 ## Commands and options
 
@@ -69,6 +72,7 @@ On the command line:
 
 | Option | Default | What it does |
 |---|---|---|
+| `--engine {handwritten,langgraph}` | `handwritten` | Which agent loop to run |
 | `--effort {low,medium,high,xhigh,max}` | `medium` | How hard the model thinks: lower is faster and cheaper |
 | `--model MODEL` | `claude-opus-5-5` | Which Claude model to use |
 | `--offline` | off | Use the sample data even if a Ticketmaster key is set |
@@ -81,47 +85,112 @@ On the command line:
 ```mermaid
 flowchart LR
     U([You]) <--> CLI[cli.py<br/>chat + commands]
-    CLI --> A[agent.py<br/>the agent loop]
+    CLI --> A[agent.py<br/>hand-written loop]
+    CLI --> G[langgraph_agent.py<br/>LangGraph]
     A <-->|messages + tool definitions| C[(Claude API)]
-    A -->|tool calls| T[tools.py<br/>validate + run]
+    G <-->|same requests| C
+    A --> T[tools.py<br/>validate + run]
+    G --> T
     T --> S[EventSource<br/>Ticketmaster or sample]
     T --> L[shortlist.py<br/>JSON file]
-    A -.->|each step| TR[trace.py<br/>prints the steps]
+    A -.-> O[LangSmith<br/>optional]
+    G -.-> O
 ```
 
-The core is [`ScoutAgent.ask`](src/event_scout/agent.py#L82). It sends the whole conversation to Claude, and Claude either answers or asks for tools to be run. When it asks for tools, the loop runs them, appends the results to the conversation, and sends it again. This repeats until Claude says it's done (`stop_reason == "end_turn"`) or a step limit is hit.
+The core is [`ScoutAgent.ask`](src/event_scout/agent.py#L82). It sends the whole conversation to Claude, and Claude either answers or asks for tools to be run. When it asks for tools, the loop runs them, appends the results to the conversation, and sends it again. This repeats until Claude says it's done (`stop_reason == "end_turn"`) or a step limit is hit. Run `/history` after any question to see the exact messages sent to the API.
 
-Claude decides **what** to do; the code decides **what's allowed**. Run `/history` after any question to see the exact messages the loop sent to the API.
+[`LangGraphScoutAgent`](src/event_scout/langgraph_agent.py) runs the same cycle through LangChain's `create_agent`, as a graph with a model node and a tools node. Both engines use the same tool definitions, system prompt, and request settings.
+
+## Comparing the engines
+
+```bash
+uv run event-scout-eval --list                                # see the questions (free)
+uv run event-scout-eval --engine both --model claude-sonnet-5-5
+```
+
+The evaluation asks 17 questions covering searches, budgets, relative dates, missing information, follow-ups, cancelled events, cases that shouldn't use tools, and a prompt-injection attempt. Each run uses the offline data on a pinned date with an empty shortlist. Answers are graded by plain code, with no AI judge: expected tools, required text, what ended up in the shortlist, and whether prices, links, and event names came from tool results.
+
+**Results** from one run per question, on Claude Sonnet 5.5 at low effort:
+
+| Engine | Passed | Avg steps | Prompt tokens | Output tokens | Cost per question (no cache) | Time per question |
+|---|---|---|---|---|---|---|
+| Hand-written | 17/17 | 2.3 | 4,827 | 268 | $0.0123 | 3.6s |
+| LangGraph | 17/17 | 2.3 | 4,827 | 269 | $0.0123 | 3.6s |
+
+**What this does and doesn't show:**
+
+- The engines tied, and that's the expected result. They send the same requests to the same model: the LangGraph run read 4,220 of 4,226 prompt tokens from the prompt cache left by the hand-written run, which requires byte-identical request prefixes. A framework's value isn't better answers here.
+- A perfect score means this set has hit its ceiling. It confirms that these 17 behaviors work, but it can't separate the engines or rank settings. That would take harder questions and more runs.
+- It's a small sample: with 17 runs per engine, pass-rate differences under about 24 points are within normal variation.
+- Caching makes paid cost depend on which engine runs first, so the table shows the cost with no cache discount. With caching, the paid cost was about $0.006 per question.
+
+### Where the engines differ
+
+Building the same agent twice exposed behavior the framework decides on its own:
+
+| | Hand-written loop | LangGraph | Handled by |
+|---|---|---|---|
+| **Parallel tool calls** | Runs them one at a time | Runs them on separate threads, which lost shortlist entries (3 of 6 saved) | A lock in `langchain_tools.py` |
+| **Step limit** | Counts model calls | Counts graph steps | `recursion_limit = 2 × max_steps` |
+| **Input tokens** | Reported as uncached only | Reported as a total, including cached | Converted in `langgraph_agent.py` |
+| **Reply cut off during a tool call** | Refuses to run it | Runs it anyway | Left as is, and recorded in a test |
+| **Code size** | 164 lines, not counting blanks and comments | 179 lines, plus a 35-line tool adapter, mostly translating formats | |
+
+The framework removes the loop, but this project needs a custom trace, cost tracking, and identical behavior across engines, and that takes translation code. A plain LangGraph agent without those needs far less.
+
+## Tracing with LangSmith
+
+Tracing is optional and off by default. To turn it on, add your settings from [smith.langchain.com](https://smith.langchain.com) to `.env`, as shown in `.env.example`:
+
+```
+LANGSMITH_TRACING=true
+LANGSMITH_API_KEY=...
+```
+
+Each question then becomes one nested trace, tagged by engine. Add `--langsmith` to the eval command to record the runs as experiments, with a score for every check:
+
+```bash
+uv run event-scout-eval --engine both --model claude-sonnet-5-5 --langsmith
+```
+
+Experiments run one engine at a time, so the engine that runs second gets more cache hits. Compare the no-cache cost when using this flag.
+
+With tracing on, prompts, tool results, and answers are sent to LangSmith's servers. Tracing can't affect the app: requests to Claude are identical with it on or off, and a LangSmith failure still returns the answer.
 
 ## Project layout
 
 ```
 src/event_scout/
-  agent.py          the agent loop: call Claude, run tools, repeat
-  tools.py          tool definitions, input validation, and the dispatcher
-  prompts.py        the system prompt
-  trace.py          prints each step of the loop
-  cli.py            terminal chat, commands, and flags
-  config.py         model, effort, limits, and prices
-  usage.py          token counting and cost estimates
-  shortlist.py      saved events, stored as a JSON file
+  agent.py            the hand-written agent loop
+  langgraph_agent.py  the same agent, built with LangGraph
+  langchain_tools.py  exposes the tools to LangChain
+  tools.py            tool definitions, input validation, and the dispatcher
+  prompts.py          the system prompt
+  evals.py            runs and grades the evaluation set
+  tracing.py          optional LangSmith tracing
+  trace.py            prints each step of the loop
+  cli.py              terminal chat, commands, and flags
+  config.py           model, effort, limits, and prices
+  usage.py            token counting and cost estimates
+  shortlist.py        saved events, stored as a JSON file
   events/
-    models.py       the normalized Event model
-    base.py         the EventSource interface every data source implements
-    ticketmaster.py Ticketmaster Discovery API client
-    sample.py       offline source over sample_events.json (fictional events)
-tests/              75 offline tests, using a fake Claude client
+    models.py         the normalized Event model
+    base.py           the EventSource interface every data source implements
+    ticketmaster.py   Ticketmaster Discovery API client
+    sample.py         offline source over sample_events.json (fictional events)
+evals/dataset.json    the evaluation questions and expectations
+tests/                265 offline tests, using fake model clients
 ```
 
 ## Design decisions
 
-- **A hand-written loop instead of a framework.** Frameworks and the SDK's tool runner hide the loop. Writing it out shows exactly what an agent is: about 40 lines of request, check `stop_reason`, run tools, repeat.
+- **A hand-written loop as the reference.** Frameworks and the SDK's tool runner hide the loop. Writing it out shows exactly what an agent is, and gives the framework version something to be measured against.
 - **One `Event` model behind an `EventSource` interface.** Ticketmaster and the offline data both convert into the same shape, so the agent never knows or cares where events come from.
 - **Pydantic models define each tool's input.** One model generates the JSON Schema Claude sees *and* validates what Claude sends back, so the two can't drift apart.
 - **Tools never raise.** Invalid input, unknown tools, API failures, and bugs all come back to Claude as error results it can read and recover from.
-- **Append-only history, fixed per-session prompt.** The conversation is never edited, and the system prompt and tool list never change mid-session. That keeps prompt caching working and satisfies Claude Opus 5.5's check that earlier reasoning wasn't tampered with.
+- **Append-only history, fixed per-session prompt.** The conversation is never edited, and the system prompt and tool list never change mid-session. That keeps prompt caching working and satisfies the API's check that earlier reasoning wasn't tampered with.
 - **Small tool results.** Search returns compact summaries; details are a separate tool. Everything in the conversation is re-sent on every step, so smaller results mean faster, cheaper steps.
-- **An observer for output.** The loop never prints. It calls hooks that the trace (or a test) implements.
+- **An observer for output.** The loop never prints. It calls hooks that the trace (or a test) implements, and tracing wraps the engine from outside, so `agent.py` doesn't know about either.
 
 ## Testing
 
@@ -129,14 +198,19 @@ tests/              75 offline tests, using a fake Claude client
 uv run pytest
 ```
 
-75 tests run offline in about a second, with no API key. The agent tests use a fake client that replays scripted responses built from the SDK's real response types. They cover the main loop, several tool calls in one reply, error recovery, truncated replies, refusals, the step limit, and the exact request sent to the API.
+265 tests run offline in a few seconds, with no API key. Fake clients replay scripted responses using the SDK's real response types. The LangGraph tests run the real `ChatAnthropic` and `create_agent` code with only the network call replaced, and many tests run one script through both engines and compare the results.
+
+The grader is tested too: a hand-written correct answer for every case must pass on both engines, an empty answer must fail every case, wrong answers must be caught, and correct answers in other formats must not be rejected.
+
+**Not yet verified against live services:**
+- The Ticketmaster client is tested only against a hand-written fixture modeled on the API's documented response, not the live API.
+- The live evaluation ran on Claude Sonnet 5.5, not the default Claude Opus 5.5.
 
 ## Roadmap
 
+- Harder evaluation questions that can separate engines and settings
 - Stream responses token by token
-- Rebuild the same agent with the SDK's Tool Runner, and compare
 - A small web UI
-- An eval set: does the agent pick the right tools for a set of questions?
 - Run multiple tool calls concurrently
 
 ## Notes
