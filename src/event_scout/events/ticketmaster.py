@@ -49,12 +49,15 @@ def _urllib_fetch(url: str, timeout: float) -> bytes:
 class TicketmasterEventSource:
     name = "ticketmaster"
 
-    def __init__(self, api_key: str, fetch: Fetch = _urllib_fetch, timeout: float = 10.0) -> None:
+    def __init__(
+        self, api_key: str, fetch: Fetch = _urllib_fetch, timeout: float = 10.0, today: date | None = None
+    ) -> None:
         if not api_key:
             raise ValueError("A Ticketmaster API key is required")
         self._api_key = api_key
         self._fetch = fetch
         self._timeout = timeout
+        self._today = today
 
     def describe(self) -> str:
         return "live data from the Ticketmaster Discovery API (real upcoming events worldwide)"
@@ -79,11 +82,13 @@ class TicketmasterEventSource:
             params["countryCode"] = country_code.upper()
         if category:
             params["segmentName"] = CATEGORY_TO_SEGMENT[category]
-        # Ticketmaster wants full UTC timestamps without fractional seconds.
-        if start_date:
-            params["startDateTime"] = f"{start_date.isoformat()}T00:00:00Z"
-        if end_date:
-            params["endDateTime"] = f"{end_date.isoformat()}T23:59:59Z"
+        # Filter on the venue's local time. The API's startDateTime and endDateTime are in
+        # UTC, so "Saturday" in Chicago would mean Friday evening through Saturday afternoon,
+        # which returned mostly Friday's shows and missed Saturday's concerts. Without a
+        # start date the API also returns events from past years, so it defaults to today.
+        start = start_date or self._today or date.today()
+        end = f"{end_date.isoformat()}T23:59:59" if end_date else "*"
+        params["localStartDateTime"] = f"{start.isoformat()}T00:00:00,{end}"
 
         data = self._get("/events.json", params)
         raw_events = data.get("_embedded", {}).get("events", [])
@@ -131,7 +136,8 @@ def parse_event(raw: dict[str, Any]) -> Event:
     start = raw.get("dates", {}).get("start", {})
     venue = _first(raw.get("_embedded", {}).get("venues"))
     classification = _first(raw.get("classifications"))
-    prices = raw.get("priceRanges") or []
+    # A range of 0 to 0 is a placeholder on events with no price set, and doesn't mean free.
+    prices = [p for p in raw.get("priceRanges") or [] if p.get("min") or p.get("max")]
     segment = (classification.get("segment") or {}).get("name", "")
     genre = (classification.get("genre") or {}).get("name")
 

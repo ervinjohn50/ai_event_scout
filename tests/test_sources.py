@@ -156,11 +156,45 @@ def test_ticketmaster_search_builds_query_and_parses_results():
         "city": "Chicago",
         "countryCode": "US",
         "segmentName": "Music",
-        "startDateTime": "2026-11-03T00:00:00Z",
-        "endDateTime": "2026-11-30T23:59:59Z",
+        "localStartDateTime": "2026-11-03T00:00:00,2026-11-30T23:59:59",
         "size": "5",
         "sort": "date,asc",
     }
+
+
+def test_ticketmaster_dates_use_local_time_not_utc():
+    """A live test found that UTC filters returned mostly the wrong day's shows in Chicago."""
+    fetch = FakeFetch()
+    TicketmasterEventSource("k", fetch=fetch).search(start_date=date(2026, 11, 7), end_date=date(2026, 11, 7))
+    params = fetch.last_params()
+    assert params["localStartDateTime"] == "2026-11-07T00:00:00,2026-11-07T23:59:59"
+    assert "startDateTime" not in params and "endDateTime" not in params
+
+
+def test_ticketmaster_start_date_defaults_to_today():
+    """Without a start date, the API returned events from past years."""
+    fetch = FakeFetch()
+    TicketmasterEventSource("k", fetch=fetch, today=TODAY).search(city="London")
+    assert fetch.last_params()["localStartDateTime"] == "2026-11-03T00:00:00,*"
+
+
+def test_ticketmaster_treats_a_zero_price_as_unknown_not_free():
+    raw = {"id": "x", "priceRanges": [{"type": "standard", "currency": "USD", "min": 0.0, "max": 0.0}]}
+    event = parse_event(raw)
+    assert event.price_min is None and event.price_max is None
+    assert event.price_label() is None
+    assert "price" not in event.summary()
+
+
+def test_ticketmaster_ignores_only_the_zero_price_ranges():
+    raw = {
+        "id": "x",
+        "priceRanges": [
+            {"type": "standard", "currency": "USD", "min": 0.0, "max": 0.0},
+            {"type": "standard", "currency": "USD", "min": 25.0, "max": 40.0},
+        ],
+    }
+    assert parse_event(raw).price_label() == "25-40 USD"
 
 
 def test_ticketmaster_search_with_no_results():

@@ -46,7 +46,7 @@ class SearchEventsInput(BaseModel):
         description="Artist, team, venue, or genre to match, e.g. 'indie rock' or 'Velvet Static'. "
         "Keep it short: a name or genre, not a sentence.",
     )
-    city: str | None = Field(None, description="City name, e.g. 'Chicago'.")
+    city: str | None = Field(None, description="City name, e.g. 'Chicago'. Use the common name: 'New York', not 'NYC'.")
     country_code: str | None = Field(
         None,
         description="Two-letter ISO country code, e.g. 'US' or 'GB'.",
@@ -163,7 +163,11 @@ def build_tools(source: EventSource, shortlist: ShortlistStore) -> ToolRegistry:
                 "or check the city spelling."
             )
         elif len(events) == args.max_results:
-            result["note"] = "There may be more results. Narrow the filters to see others."
+            result["note"] = (
+                "Only the earliest matches are shown, because results are sorted by date. Later events "
+                "may exist: raise max_results (up to 25), or narrow the dates or keyword, before "
+                "saying what's available."
+            )
         return result
 
     def get_event_details(args: GetEventDetailsInput) -> dict[str, Any]:
