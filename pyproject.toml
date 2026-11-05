@@ -14,6 +14,7 @@ dependencies = [
 
 [project.scripts]
 event-scout = "event_scout.cli:main"
+event-scout-eval = "event_scout.evals:main"
 
 [project.optional-dependencies]
 langchain = [

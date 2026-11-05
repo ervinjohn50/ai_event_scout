@@ -12,6 +12,9 @@ dist/
 # Runtime data written by the agent (your personal shortlist)
 data/
 
+# Eval output: full conversations from each run
+evals/results/
+
 # Personal learning notes, kept local only
 docs/HOW_IT_WORKS.md
 

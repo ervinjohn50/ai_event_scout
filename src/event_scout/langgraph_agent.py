@@ -154,6 +154,7 @@ def _as_api_response(message: AIMessage) -> SimpleNamespace:
     metadata = message.response_metadata
     details = metadata.get("stop_details")
     return SimpleNamespace(
+        model=metadata.get("model_name") or metadata.get("model"),
         content=_content_blocks(message),
         stop_reason=metadata.get("stop_reason"),
         stop_details=SimpleNamespace(**details) if details else None,
