@@ -13,7 +13,9 @@ The agent is built twice: once as a **custom tool-use loop** over the Claude API
 - Keeps a shortlist of saved events between sessions in a SQLite database.
 - Reports usage per engine, with a SQL query behind the stats page.
 
-![The Event Scout web app answering a question with live Ticketmaster data](docs/web-app.jpg)
+![Event Scout finding jazz shows on live Ticketmaster data, saving one with a note, then showing the shortlist and stats pages](docs/demo.gif)
+
+*A real run in real time, on Claude Sonnet 5.5 and live Ticketmaster data, recorded in November 2026.*
 
 ## Example
 
