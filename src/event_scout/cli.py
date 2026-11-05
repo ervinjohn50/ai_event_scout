@@ -22,8 +22,9 @@ from . import __version__
 from .agent import AgentObserver, AgentReply, ScoutAgent
 from .config import DEFAULT_EFFORT, DEFAULT_MAX_STEPS, DEFAULT_MODEL, EFFORT_LEVELS, PRICING, AgentConfig
 from .events import EventSource, SampleEventSource, TicketmasterEventSource
+from .db import DEFAULT_DB_PATH
 from .prompts import build_system_prompt
-from .shortlist import DEFAULT_SHORTLIST_PATH, ShortlistError, ShortlistStore
+from .shortlist import ShortlistError, ShortlistStore
 from .tools import ToolRegistry, build_tools
 from .trace import ConsoleTrace
 from .tracing import configure_tracing, flush_traces
@@ -76,7 +77,7 @@ def main(argv: list[str] | None = None, client: Any = None, chat_model: Any = No
         return 2
 
     source = choose_source(args.offline, os.environ)
-    store = ShortlistStore(args.shortlist_path)
+    store = ShortlistStore(args.db_path)
     config = AgentConfig(
         model=args.model,
         effort=args.effort,
@@ -176,10 +177,10 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     parser.add_argument("--no-fallbacks", action="store_true", help="don't send the refusal-fallback beta")
     parser.add_argument(
-        "--shortlist-path",
+        "--db-path",
         type=Path,
-        default=DEFAULT_SHORTLIST_PATH,
-        help=f"where saved events are stored (default: {DEFAULT_SHORTLIST_PATH})",
+        default=DEFAULT_DB_PATH,
+        help=f"the SQLite database file where saved events are stored (default: {DEFAULT_DB_PATH})",
     )
     detail = parser.add_mutually_exclusive_group()
     detail.add_argument("--quiet", action="store_true", help="hide the step-by-step trace")

@@ -34,7 +34,7 @@ class SpyRegistry(ToolRegistry):
 
 @pytest.fixture
 def tools(tmp_path) -> SpyRegistry:
-    return SpyRegistry(build_tools(SampleEventSource(today=TODAY), ShortlistStore(tmp_path / "s.json")))
+    return SpyRegistry(build_tools(SampleEventSource(today=TODAY), ShortlistStore(tmp_path / "s.db")))
 
 
 def make_agent(responses, tools, **config) -> tuple[ScoutAgent, FakeClient]:

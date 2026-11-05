@@ -92,7 +92,7 @@ flowchart LR
     A --> T[tools.py<br/>validate + run]
     G --> T
     T --> S[EventSource<br/>Ticketmaster or sample]
-    T --> L[shortlist.py<br/>JSON file]
+    T --> L[shortlist.py<br/>SQLite database]
     A -.-> O[LangSmith<br/>optional]
     G -.-> O
 ```
@@ -130,7 +130,7 @@ Building the same agent twice exposed behavior the framework decides on its own:
 
 | | Custom loop | LangGraph | Handled by |
 |---|---|---|---|
-| **Parallel tool calls** | Runs them one at a time | Runs them on separate threads, which lost shortlist entries (3 of 6 saved) | A lock in `langchain_tools.py` |
+| **Parallel tool calls** | Runs them one at a time | Runs them on separate threads, which lost shortlist entries with the original JSON storage (3 of 6 saved) | A lock in `langchain_tools.py` makes both engines run tools one at a time, and saves are now safe in SQLite |
 | **Step limit** | Counts model calls | Counts graph steps | `recursion_limit = 2 × max_steps` |
 | **Input tokens** | Reported as uncached only | Reported as a total, including cached | Converted in `langgraph_agent.py` |
 | **Reply cut off during a tool call** | Refuses to run it | Runs it anyway | Left as is, and recorded in a test |
@@ -191,7 +191,8 @@ src/event_scout/
   cli.py              terminal chat, commands, and flags
   config.py           model, effort, limits, and prices
   usage.py            token counting and cost estimates
-  shortlist.py        saved events, stored as a JSON file
+  db.py               the SQLite database: connections, schema, transactions
+  shortlist.py        saved events, stored in SQLite
   events/
     models.py         the normalized Event model
     base.py           the EventSource interface every data source implements

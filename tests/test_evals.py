@@ -131,7 +131,7 @@ def make_record(answer, calls=(), shortlist=None, stop_reason="end_turn"):
 
     with tempfile.TemporaryDirectory() as directory:
         source = evals.build_source(DATASET, Path(directory))
-        tools = build_tools(source, ShortlistStore(Path(directory) / "s.json"))
+        tools = build_tools(source, ShortlistStore(Path(directory) / "s.db"))
         tool_calls = []
         for name, tool_input in calls:
             outcome = tools.run(name, tool_input)
@@ -153,7 +153,7 @@ def test_case_ids_are_unique():
 
 def test_cases_only_refer_to_real_tools_and_events(tmp_path):
     source = evals.build_source(DATASET, tmp_path)
-    tool_names = {d["name"] for d in build_tools(source, ShortlistStore(tmp_path / "s.json")).definitions()}
+    tool_names = {d["name"] for d in build_tools(source, ShortlistStore(tmp_path / "s.db")).definitions()}
     for case in DATASET.cases:
         assert set(case.tools_called + case.tools_not_called) <= tool_names, case.id
         for event_id in case.setup_shortlist + [e.event_id for e in case.shortlist_contains]:

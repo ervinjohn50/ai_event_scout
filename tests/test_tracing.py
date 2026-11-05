@@ -36,7 +36,7 @@ SYSTEM = "You are a test scout."
 
 @pytest.fixture
 def registry(tmp_path):
-    return build_tools(SampleEventSource(today=TODAY), ShortlistStore(tmp_path / "shortlist.json"))
+    return build_tools(SampleEventSource(today=TODAY), ShortlistStore(tmp_path / "shortlist.db"))
 
 
 def script():

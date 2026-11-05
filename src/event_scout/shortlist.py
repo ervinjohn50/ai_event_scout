@@ -1,56 +1,44 @@
-"""The user's personal shortlist of saved events, stored as a JSON file.
+"""The user's personal shortlist of saved events, stored in the SQLite database.
 
 The model itself remembers nothing between conversations. Anything an agent should
 "remember" has to live somewhere outside the model, and tools are how the agent
-reads and writes it. This file is the simplest possible version of agent memory.
+reads and writes it.
 """
 
 from __future__ import annotations
 
-import json
-import os
+import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .db import DEFAULT_DB_PATH, connect, transaction
 from .events import Event
 
-DEFAULT_SHORTLIST_PATH = Path("data") / "shortlist.json"
+_COLUMNS = "event_id, name, date, venue, city, price, ticket_url, source, note, saved_at"
 
 
 class ShortlistError(Exception):
-    """The shortlist file exists but can't be read."""
+    """The database exists but can't be read or written."""
 
 
 class ShortlistStore:
-    def __init__(self, path: Path = DEFAULT_SHORTLIST_PATH) -> None:
+    def __init__(self, path: Path = DEFAULT_DB_PATH) -> None:
         self.path = Path(path)
 
     def all(self) -> list[dict[str, Any]]:
-        if not self.path.exists():
-            return []
-        try:
-            entries = json.loads(self.path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            raise ShortlistError(f"The shortlist file {self.path} is not valid JSON.") from None
-        if not isinstance(entries, list):
-            raise ShortlistError(f"The shortlist file {self.path} has an unexpected format.")
-        return entries
+        """Every saved event, oldest first."""
+        with self._reporting_errors(), connect(self.path) as connection:
+            rows = connection.execute(f"SELECT {_COLUMNS} FROM shortlist ORDER BY rowid").fetchall()
+        return [dict(row) for row in rows]
 
     def add(self, event: Event, note: str | None = None) -> tuple[dict[str, Any], bool]:
         """Save an event. Returns (entry, created): created is False if it was already saved."""
-        entries = self.all()
-        existing = next((e for e in entries if e["event_id"] == event.id), None)
-        if existing is not None:
-            # Saving again updates the note instead of creating a duplicate.
-            if note:
-                existing["note"] = note
-            self._write(entries)
-            return existing, False
-
         # Store a snapshot of the event, not just its ID: the shortlist should still
         # make sense later, even if the data source changes or the event disappears.
-        entry = {
+        values = {
             "event_id": event.id,
             "name": event.name,
             "date": event.start_date.isoformat() if event.start_date else "TBA",
@@ -62,14 +50,37 @@ class ShortlistStore:
             "note": note,
             "saved_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         }
-        entries.append(entry)
-        self._write(entries)
-        return entry, True
+        with self._reporting_errors(), transaction(self.path) as connection:
+            # If the event_id is already saved, the database skips the insert. It checks this
+            # itself, so two saves arriving together can't both create a row or overwrite
+            # each other. Parameters (:name) keep event text from being run as SQL.
+            inserted = connection.execute(
+                """
+                INSERT INTO shortlist (event_id, name, date, venue, city, price, ticket_url, source, note, saved_at)
+                VALUES (:event_id, :name, :date, :venue, :city, :price, :ticket_url, :source, :note, :saved_at)
+                ON CONFLICT (event_id) DO NOTHING
+                """,
+                values,
+            )
+            created = inserted.rowcount == 1
+            # Saving again updates the note instead of creating a duplicate.
+            if not created and note:
+                connection.execute("UPDATE shortlist SET note = ? WHERE event_id = ?", (note, event.id))
+            entry = connection.execute(
+                f"SELECT {_COLUMNS} FROM shortlist WHERE event_id = ?", (event.id,)
+            ).fetchone()
+        return dict(entry), created
 
-    def _write(self, entries: list[dict[str, Any]]) -> None:
-        # Write to a temporary file first, then swap it into place. If the program
-        # crashes halfway through writing, the old shortlist is still intact.
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(entries, indent=2, ensure_ascii=False), encoding="utf-8")
-        os.replace(tmp, self.path)
+    def remove(self, event_id: str) -> bool:
+        """Delete a saved event. Returns False if it wasn't saved."""
+        with self._reporting_errors(), transaction(self.path) as connection:
+            deleted = connection.execute("DELETE FROM shortlist WHERE event_id = ?", (event_id,))
+            return deleted.rowcount == 1
+
+    @contextmanager
+    def _reporting_errors(self) -> Iterator[None]:
+        """Turn storage failures into ShortlistError, which the tools report to the model."""
+        try:
+            yield
+        except (sqlite3.Error, OSError) as err:
+            raise ShortlistError(f"The database {self.path} can't be used: {err}.") from None

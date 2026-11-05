@@ -76,7 +76,7 @@ class ScoutAgent:
         self.total_usage = TokenUsage()
 
     def reset(self) -> None:
-        """Start a fresh conversation. The shortlist file is unaffected."""
+        """Start a fresh conversation. The saved shortlist is unaffected."""
         self.messages = []
 
     def ask(self, user_text: str) -> AgentReply:

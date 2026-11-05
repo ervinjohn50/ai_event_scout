@@ -151,7 +151,7 @@ class ToolRegistry:
 
 
 def build_tools(source: EventSource, shortlist: ShortlistStore) -> ToolRegistry:
-    """Create the agent's tools, wired to a data source and a shortlist file."""
+    """Create the agent's tools, wired to a data source and a shortlist."""
 
     def search_events(args: SearchEventsInput) -> dict[str, Any]:
         events = source.search(**args.model_dump())
@@ -177,7 +177,7 @@ def build_tools(source: EventSource, shortlist: ShortlistStore) -> ToolRegistry:
         return event.details()
 
     def save_to_shortlist(args: SaveToShortlistInput) -> dict[str, Any]:
-        # A tool with a side effect (it writes a file). Saving is harmless, so it runs
+        # A tool with a side effect (it writes to the database). Saving is harmless, so it runs
         # without asking. A riskier action (buying tickets, sending an email) should
         # stop and ask the user to confirm before doing anything.
         event = source.get(args.event_id)

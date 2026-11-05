@@ -18,7 +18,7 @@ TODAY = date(2026, 11, 3)
 
 @pytest.fixture
 def store(tmp_path) -> ShortlistStore:
-    return ShortlistStore(tmp_path / "shortlist.json")
+    return ShortlistStore(tmp_path / "shortlist.db")
 
 
 @pytest.fixture
@@ -172,10 +172,10 @@ def test_empty_shortlist(registry):
     assert run_ok(registry, "list_shortlist", {}) == {"count": 0, "entries": []}
 
 
-def test_corrupted_shortlist_file_is_reported_not_crashed(registry, store):
-    store.path.write_text("{not json")
+def test_corrupted_database_is_reported_not_crashed(registry, store):
+    store.path.write_text("this is not a database file, " * 100)
     outcome = registry.run("list_shortlist", {})
-    assert outcome.is_error and "not valid JSON" in outcome.content
+    assert outcome.is_error and "can't be used" in outcome.content
     with pytest.raises(ShortlistError):
         store.all()
 

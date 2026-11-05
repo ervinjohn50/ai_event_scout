@@ -185,7 +185,7 @@ def run_case(case: Case, dataset: Dataset, engine_name: str, make_engine: Engine
     record = RunRecord(case.id, engine_name, rep)
     with tempfile.TemporaryDirectory() as directory:
         source = build_source(dataset, Path(directory))
-        store = ShortlistStore(Path(directory) / "shortlist.json")
+        store = ShortlistStore(Path(directory) / "shortlist.db")
         for event_id in case.setup_shortlist:
             store.add(source.get(event_id))
 

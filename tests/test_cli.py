@@ -186,7 +186,7 @@ def test_ctrl_c_during_an_answer_resets_the_conversation(monkeypatch, capsys):
 
 
 def test_print_shortlist_formats_entries(tmp_path, capsys):
-    store = ShortlistStore(tmp_path / "s.json")
+    store = ShortlistStore(tmp_path / "s.db")
     store.add(SampleEventSource().get("sample-002"), note="date night")
 
     cli.print_shortlist(store)

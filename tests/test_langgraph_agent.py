@@ -6,6 +6,8 @@ the real ChatAnthropic and create_agent code, with only the network call replace
 """
 
 import json
+import threading
+import time
 from datetime import date
 
 import pytest
@@ -30,7 +32,7 @@ SYSTEM = "You are a test scout."
 
 @pytest.fixture
 def registry(tmp_path):
-    return build_tools(SampleEventSource(today=TODAY), ShortlistStore(tmp_path / "shortlist.json"))
+    return build_tools(SampleEventSource(today=TODAY), ShortlistStore(tmp_path / "shortlist.db"))
 
 
 def make_langgraph(responses, registry, **config):
@@ -248,9 +250,49 @@ def test_reset_starts_a_new_conversation(registry):
 # --- Differences the engine has to handle -------------------------------------------------------
 
 
+class OverlapTrackingRegistry:
+    """Records the most tool calls that were ever running at the same moment."""
+
+    def __init__(self, tools):
+        self._tools = tools
+        self._guard = threading.Lock()
+        self._running = 0
+        self.most_at_once = 0
+
+    def definitions(self):
+        return self._tools.definitions()
+
+    def run(self, name, raw_input):
+        with self._guard:
+            self._running += 1
+            self.most_at_once = max(self.most_at_once, self._running)
+        time.sleep(0.02)  # long enough for the other threads to start if nothing stops them
+        outcome = self._tools.run(name, raw_input)
+        with self._guard:
+            self._running -= 1
+        return outcome
+
+
+def test_parallel_tool_calls_run_one_at_a_time_like_the_custom_loop(registry):
+    """LangGraph runs parallel tool calls on separate threads. The lock in
+    langchain_tools.py keeps them from overlapping."""
+    tracking = OverlapTrackingRegistry(registry)
+    agent, _ = make_langgraph(
+        [
+            response(
+                *[tool_use(f"t{i}", "list_shortlist", {}) for i in range(6)],
+                stop_reason="tool_use",
+            ),
+            response(text("Done.")),
+        ],
+        tracking,
+    )
+    agent.ask("check it six times")
+    assert tracking.most_at_once == 1
+
+
 def test_parallel_saves_all_reach_the_shortlist(registry):
-    """LangGraph runs parallel tool calls on separate threads. Without the lock in
-    langchain_tools.py, concurrent saves overwrite each other and entries are lost."""
+    """Every save from one reply is kept when LangGraph runs them on separate threads."""
     ids = [f"sample-00{i}" for i in range(1, 8)]
     agent, _ = make_langgraph(
         [
