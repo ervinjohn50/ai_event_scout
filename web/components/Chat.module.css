@@ -168,9 +168,51 @@
   color: var(--danger-text);
 }
 
+.progress {
+  color: var(--text-muted);
+  font-size: 0.9375rem;
+}
+
+.progress ul {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 0 6px;
+  padding: 0;
+  list-style: none;
+}
+
+.progress li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.running,
+.done,
+.failed {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  transform: translateY(-1px);
+}
+
+.running {
+  background: var(--accent);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.done {
+  background: var(--border-strong);
+}
+
+.failed {
+  background: var(--danger-text);
+}
+
 .working {
   margin: 0;
-  color: var(--text-muted);
   animation: pulse 1.6s ease-in-out infinite;
 }
 
@@ -181,7 +223,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .working {
+  .working,
+  .running {
     animation: none;
   }
 }

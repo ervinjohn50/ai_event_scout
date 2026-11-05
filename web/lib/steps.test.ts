@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { describeStep, formatCost, stopNotice } from "./steps";
+import { describeRunningStep, describeStep, formatCost, stopNotice } from "./steps";
 
 const step = (tool: string, input: Record<string, unknown> = {}) => ({ tool, input, is_error: false });
 
@@ -16,6 +16,19 @@ describe("describeStep", () => {
     [step("new_tool"), "Ran new_tool"],
   ])("describes %j", (input, expected) => {
     expect(describeStep(input)).toBe(expected);
+  });
+});
+
+describe("describeRunningStep", () => {
+  it.each([
+    [step("search_events", { keyword: "jazz", city: "Chicago" }), "Searching for jazz in Chicago"],
+    [step("search_events"), "Searching for events"],
+    [step("get_event_details"), "Looking up event details"],
+    [step("save_to_shortlist"), "Saving an event to the shortlist"],
+    [step("list_shortlist"), "Checking the shortlist"],
+    [step("new_tool"), "Running new_tool"],
+  ])("describes %j", (input, expected) => {
+    expect(describeRunningStep(input)).toBe(expected);
   });
 });
 

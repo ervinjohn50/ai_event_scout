@@ -9,6 +9,7 @@ import {
   endConversation,
   getHealth,
   type Health,
+  type ProgressEvent,
   sendMessage,
 } from "@/lib/api";
 
@@ -16,6 +17,13 @@ export type ChatItem =
   | { id: number; kind: "user"; text: string }
   | { id: number; kind: "assistant"; reply: ChatResponse }
   | { id: number; kind: "error"; text: string };
+
+export interface LiveStep {
+  id: string;
+  tool: string;
+  input: Record<string, unknown>;
+  status: "running" | "done" | "failed";
+}
 
 type NewChatItem = { kind: "user"; text: string } | { kind: "assistant"; reply: ChatResponse } | { kind: "error"; text: string };
 
@@ -25,6 +33,7 @@ interface ChatState {
   setDraft: (draft: string) => void;
   engine: EngineName;
   sending: boolean;
+  liveSteps: LiveStep[];
   health: Health | null;
   healthError: string | null;
   send: () => Promise<void>;
@@ -53,6 +62,7 @@ export function ChatProvider({
   const [engine, setEngine] = useState<EngineName>("custom");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [liveSteps, setLiveSteps] = useState<LiveStep[]>([]);
   const [health, setHealth] = useState<Health | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
   const nextId = useRef(1);
@@ -96,6 +106,16 @@ export function ChatProvider({
     setEngine(nextEngine);
   }
 
+  function handleProgress(event: ProgressEvent) {
+    if (event.type === "tool_start") {
+      const { id, tool, input } = event;
+      setLiveSteps((steps) => [...steps, { id, tool, input, status: "running" }]);
+    } else if (event.type === "tool_result") {
+      const status = event.is_error ? "failed" : "done";
+      setLiveSteps((steps) => steps.map((step) => (step.id === event.id ? { ...step, status } : step)));
+    }
+  }
+
   async function send() {
     const message = draft.trim();
     if (!message || sending) return;
@@ -103,8 +123,9 @@ export function ChatProvider({
     addItem({ kind: "user", text: message });
     setDraft("");
     setSending(true);
+    setLiveSteps([]);
     try {
-      const reply = await sendMessage(message, { sessionId, engine });
+      const reply = await sendMessage(message, { sessionId, engine }, handleProgress);
       setSessionId(reply.session_id);
       addItem({ kind: "assistant", reply });
     } catch (err) {
@@ -116,12 +137,13 @@ export function ChatProvider({
       addItem({ kind: "error", text: `${reason} Your next message starts a new conversation.` });
     } finally {
       setSending(false);
+      setLiveSteps([]);
     }
   }
 
   return (
     <ChatContext.Provider
-      value={{ items, draft, setDraft, engine, sending, health, healthError, send, startNewChat }}
+      value={{ items, draft, setDraft, engine, sending, liveSteps, health, healthError, send, startNewChat }}
     >
       {children}
     </ChatContext.Provider>

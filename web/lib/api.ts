@@ -1,6 +1,8 @@
 // Every call to the backend goes through this file. The types match the response models in
 // src/event_scout/api.py and need to be changed together with them.
 
+import { readServerSentEvents } from "./sse";
+
 export const MAX_MESSAGE_LENGTH = 4000;
 
 export type EngineName = "custom" | "langgraph";
@@ -29,6 +31,12 @@ export interface ChatResponse {
   cost_usd: number | null;
   seconds: number;
 }
+
+/** Progress reported while the agent works. Thinking and tool results stay on the server. */
+export type ProgressEvent =
+  | { type: "model_call"; step: number }
+  | { type: "tool_start"; id: string; tool: string; input: Record<string, unknown> }
+  | { type: "tool_result"; id: string; tool: string; input: Record<string, unknown>; is_error: boolean };
 
 export interface Health {
   status: "ok";
@@ -82,8 +90,9 @@ export class ApiError extends Error {
 }
 
 const UNREACHABLE = "Can't reach the API server. Check that it's running, then try again.";
+const CONNECTION_LOST = "The connection to the server was lost before the answer arrived.";
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function fetchOk(path: string, init?: RequestInit): Promise<Response> {
   let response: Response;
   try {
     response = await fetch(path, init);
@@ -92,6 +101,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError(UNREACHABLE, 0);
   }
   if (!response.ok) throw new ApiError(await errorMessage(response), response.status);
+  return response;
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetchOk(path, init);
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
 }
@@ -112,11 +126,13 @@ export function getHealth(signal?: AbortSignal): Promise<Health> {
   return request<Health>("/api/health", { signal });
 }
 
-export function sendMessage(
+/** Asks a question, calling `onProgress` as the agent works, and returns the final answer. */
+export async function sendMessage(
   message: string,
   conversation: { sessionId: string | null; engine: EngineName },
+  onProgress: (event: ProgressEvent) => void,
 ): Promise<ChatResponse> {
-  return request<ChatResponse>("/api/chat", {
+  const response = await fetchOk("/api/chat/stream", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -125,6 +141,20 @@ export function sendMessage(
       session_id: conversation.sessionId,
     }),
   });
+  if (!response.body) throw new ApiError(CONNECTION_LOST, 0);
+
+  try {
+    for await (const { event, data } of readServerSentEvents(response.body)) {
+      const payload = JSON.parse(data);
+      if (event === "done") return payload as ChatResponse;
+      if (event === "error") throw new ApiError(payload.detail, payload.status);
+      onProgress({ type: event, ...payload } as ProgressEvent);
+    }
+  } catch (err) {
+    if (err instanceof ApiError) throw err;
+    throw new ApiError(CONNECTION_LOST, 0);
+  }
+  throw new ApiError(CONNECTION_LOST, 0); // the stream ended without an answer
 }
 
 export function endConversation(sessionId: string): Promise<void> {

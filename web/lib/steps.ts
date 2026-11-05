@@ -23,6 +23,25 @@ export function describeStep({ tool, input }: ToolStep): string {
   }
 }
 
+/** The same description while the tool is still running, such as "Searching for jazz in Chicago". */
+export function describeRunningStep({ tool, input }: Pick<ToolStep, "tool" | "input">): string {
+  switch (tool) {
+    case "search_events": {
+      const keyword = text(input.keyword);
+      const city = text(input.city);
+      return `Searching for ${keyword ?? "events"}${city ? ` in ${city}` : ""}`;
+    }
+    case "get_event_details":
+      return "Looking up event details";
+    case "save_to_shortlist":
+      return "Saving an event to the shortlist";
+    case "list_shortlist":
+      return "Checking the shortlist";
+    default:
+      return `Running ${tool}`;
+  }
+}
+
 /** A label for replies that didn't finish normally. Null means the reply is complete. */
 export function stopNotice(stopReason: string): string | null {
   switch (stopReason) {

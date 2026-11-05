@@ -136,6 +136,180 @@ def test_a_cut_off_reply_is_returned_with_its_stop_reason(db_path):
     assert "cut off" in body["answer"]
 
 
+# --- Streaming -------------------------------------------------------------------------------
+
+
+def stream_events(web, message="hi", **fields):
+    """Post to the streaming endpoint and return the response and its parsed events."""
+    result = web.post("/api/chat/stream", json={"message": message, **fields})
+    events = []
+    for block in result.text.split("\n\n"):
+        if block.startswith("event: "):
+            name, data = block.split("\n", 1)
+            events.append((name.removeprefix("event: "), json.loads(data.removeprefix("data: "))))
+    return result, events
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_a_stream_reports_each_step_in_order_then_the_answer(db_path, engine):
+    script = [
+        response(
+            thinking("private reasoning"),
+            tool_use("t1", "search_events", {"city": "Chicago"}),
+            tool_use("t2", "get_event_details", {"event_id": "made-up"}),
+            stop_reason="tool_use",
+        ),
+        response(text("Found it.")),
+    ]
+    web = make_web_client(db_path, **fake_for(engine, script))
+    result, events = stream_events(web, engine=engine)
+
+    assert result.status_code == 200
+    assert result.headers["content-type"].startswith("text/event-stream")
+    assert "no-transform" in result.headers["cache-control"]
+
+    names = [name for name, _ in events]
+    assert names[0] == "model_call"
+    assert names[-1] == "done"
+    assert names.count("model_call") == 2
+    assert names.count("tool_start") == 2
+    assert names.count("tool_result") == 2
+    # Each tool starts before it reports a result, and the next model call waits for both.
+    assert names.index("tool_start") < names.index("tool_result")
+    assert names.index("model_call", 1) > len(names) - 3
+
+    starts = {data["id"]: data for name, data in events if name == "tool_start"}
+    assert starts["t1"] == {"id": "t1", "tool": "search_events", "input": {"city": "Chicago"}}
+    results = {data["id"]: data for name, data in events if name == "tool_result"}
+    assert results["t1"]["is_error"] is False
+    assert results["t2"]["is_error"] is True
+
+    done = events[-1][1]
+    assert done["answer"] == "Found it."
+    assert done["engine"] == engine
+    assert done["steps"] == 2
+    assert len(done["tool_calls"]) == 2
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_a_stream_never_includes_thinking_or_tool_results(db_path, engine):
+    script = [
+        response(thinking("private reasoning"), tool_use("t1", "list_shortlist", {}), stop_reason="tool_use"),
+        response(text("Done.")),
+    ]
+    web = make_web_client(db_path, **fake_for(engine, script))
+    result, _ = stream_events(web, engine=engine)
+    assert "private reasoning" not in result.text
+    assert '"entries"' not in result.text
+
+
+def test_a_follow_up_can_use_the_stream(db_path):
+    client = FakeClient([response(text("First.")), response(text("Second."))])
+    web = make_web_client(db_path, client=client)
+    session_id = stream_events(web, "first")[1][-1][1]["session_id"]
+    _, events = stream_events(web, "second", session_id=session_id)
+
+    assert events[-1][1]["session_id"] == session_id
+    assert [m["role"] for m in client.requests[-1]["messages"]] == ["user", "assistant", "user"]
+
+
+def test_a_streamed_question_is_recorded_once(db_path):
+    web = make_web_client(db_path, client=FakeClient([response(text("Hi."))]))
+    stream_events(web)
+    assert web.get("/api/stats").json()["engines"][0]["questions"] == 1
+
+
+def test_a_failure_during_a_stream_becomes_an_error_event_and_ends_the_conversation(db_path):
+    client = FakeClient([response(text("Hi."))])
+    web = make_web_client(db_path, client=client)
+    session_id = stream_events(web)[1][-1][1]["session_id"]
+
+    error = anthropic.RateLimitError("slow", response=httpx2.Response(429, request=REQUEST), body=None)
+    client.beta.messages.create = FailingClient(error)._create
+    result, events = stream_events(web, session_id=session_id)
+
+    assert result.status_code == 200  # the stream had already started
+    assert events[-1][0] == "error"
+    assert events[-1][1]["status"] == 429
+    assert "Rate limited" in events[-1][1]["detail"]
+    assert stream_events(web, session_id=session_id)[0].status_code == 404
+
+
+def test_an_unexpected_failure_during_a_stream_doesnt_reveal_details(db_path):
+    web = make_web_client(db_path, client=FailingClient(ValueError("secret detail")))
+    result, events = stream_events(web)
+    assert events[-1] == ("error", {"status": 500, "detail": "Something went wrong answering that."})
+    assert "secret detail" not in result.text
+
+
+def test_problems_found_before_a_stream_starts_get_a_normal_status(db_path):
+    web = make_web_client(db_path, client=FakeClient([]))
+    assert stream_events(web, session_id="made-up")[0].status_code == 404
+    assert web.post("/api/chat/stream", json={"message": ""}).status_code == 422
+    assert web.post("/api/chat/stream", content=json.dumps({"message": "hi"})).status_code == 422
+
+
+def test_a_plain_question_can_follow_a_streamed_one(db_path):
+    client = FakeClient(
+        [
+            response(text("First.")),
+            response(tool_use("t1", "list_shortlist", {}), stop_reason="tool_use"),
+            response(text("Second.")),
+        ]
+    )
+    web = make_web_client(db_path, client=client)
+    session_id = stream_events(web, "first")[1][-1][1]["session_id"]
+    second = chat(web, "second", session_id=session_id).json()
+    assert second["answer"] == "Second."
+    assert [step["tool"] for step in second["tool_calls"]] == ["list_shortlist"]
+
+
+def test_a_question_waiting_its_turn_on_a_stream_is_told_the_conversation_ended(db_path):
+    in_flight = threading.Event()
+    release = threading.Event()
+
+    class FailsOnceWaiting(FakeClient):
+        def _create(self, **request):
+            if len(self.requests) == 1:
+                self.requests.append(request)
+                in_flight.set()
+                release.wait(timeout=10)
+                raise anthropic.APIConnectionError(request=REQUEST)
+            return super()._create(**request)
+
+    client = FailsOnceWaiting([response(text("Hi."))])
+    web = make_web_client(db_path, client=client)
+    session_id = stream_events(web)[1][-1][1]["session_id"]
+
+    results = {}
+    first = threading.Thread(target=lambda: results.update(first=stream_events(web, session_id=session_id)[1][-1][1]))
+    second = threading.Thread(target=lambda: results.update(second=stream_events(web, session_id=session_id)[1][-1][1]))
+    first.start()
+    assert in_flight.wait(timeout=10)
+    second.start()
+    time.sleep(0.1)
+    release.set()
+    first.join()
+    second.join()
+
+    assert results["first"]["status"] == 502
+    assert results["second"]["status"] == 404
+
+
+def test_quiet_periods_send_a_keep_alive_comment(db_path, monkeypatch):
+    monkeypatch.setattr(api_module, "KEEP_ALIVE_SECONDS", 0.01)
+
+    class SlowClient(FakeClient):
+        def _create(self, **request):
+            time.sleep(0.1)
+            return super()._create(**request)
+
+    web = make_web_client(db_path, client=SlowClient([response(text("Hi."))]))
+    result, events = stream_events(web)
+    assert ": keep-alive" in result.text
+    assert events[-1][0] == "done"
+
+
 # --- Invalid requests ------------------------------------------------------------------------
 
 

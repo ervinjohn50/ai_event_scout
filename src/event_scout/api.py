@@ -10,20 +10,31 @@ Conversations live in memory, because the API is stateless and each engine keeps
 history format. Restarting the server clears them. Saved events and run stats are in the
 database and remain.
 
+POST /api/chat/stream reports each step while the agent works, using Server-Sent Events:
+
+    worker thread: runs the agent -> observer hooks -> queue -> stream() -> browser
+
+The agent blocks until it's done, so it needs its own thread for updates to go out in the
+meantime. The queue is the safe way to pass them between threads. If the browser disconnects,
+the agent still finishes, because the tokens are already being paid for and stopping partway
+could leave the conversation's history incomplete.
+
 This server has no login, so it's only meant to run on the user's own computer.
 """
 
 from __future__ import annotations
 
 import importlib.util
+import json
 import logging
 import os
+import queue
 import sqlite3
 import threading
 import time
 import uuid
 from collections import OrderedDict
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import date
@@ -33,7 +44,7 @@ from typing import Annotated, Any, Literal
 import anthropic
 from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, StringConstraints
 
 from .agent import AgentObserver
@@ -60,6 +71,10 @@ logger = logging.getLogger(__name__)
 
 MAX_MESSAGE_LENGTH = 4_000
 MAX_SESSIONS = 100
+
+# A comment sent during long silences, so connections aren't dropped as idle. It also means
+# the stream notices a disconnected browser soon after it happens.
+KEEP_ALIVE_SECONDS = 15
 
 # Rejects requests addressed to any other host name, which stops a malicious website from
 # pointing its own domain at this computer to reach the server (DNS rebinding).
@@ -146,14 +161,35 @@ class HealthResponse(BaseModel):
 # --- Conversations ---------------------------------------------------------------------------
 
 
+Publish = Callable[[str, dict[str, Any]], None]
+
+
 class _StepRecorder(AgentObserver):
-    """Collects the tool calls made while answering one question."""
+    """Collects the tool calls for one question, and reports progress if anyone's listening.
+
+    Only tool names and inputs are reported. Thinking text and tool results stay on the server.
+    """
 
     def __init__(self) -> None:
         self.steps: list[ToolStep] = []
+        self.publish: Publish | None = None
+
+    def _report(self, event: str, payload: dict[str, Any]) -> None:
+        if self.publish is not None:
+            self.publish(event, payload)
+
+    def on_model_call(self, step: int, messages: list[dict[str, Any]]) -> None:
+        self._report("model_call", {"step": step})
+
+    def on_model_response(self, step: int, response: Any) -> None:
+        for block in response.content:
+            if block.type == "tool_use":
+                self._report("tool_start", {"id": block.id, "tool": block.name, "input": dict(block.input)})
 
     def on_tool_result(self, tool_use: Any, outcome: ToolOutcome) -> None:
-        self.steps.append(ToolStep(tool=tool_use.name, input=dict(tool_use.input), is_error=outcome.is_error))
+        step = ToolStep(tool=tool_use.name, input=dict(tool_use.input), is_error=outcome.is_error)
+        self.steps.append(step)
+        self._report("tool_result", {"id": tool_use.id, **step.model_dump()})
 
 
 @dataclass
@@ -298,7 +334,7 @@ def create_app(
             sessions.discard(session.id)
             record_run(session, ERROR, time.perf_counter() - started)
             logger.exception("The agent failed while answering a question.")
-            raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Something went wrong answering that.") from None
+            raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, _FAILED) from None
 
         seconds = time.perf_counter() - started
         record_run(session, reply.stop_reason, seconds, reply.steps, reply.usage)
@@ -319,17 +355,70 @@ def create_app(
             seconds=seconds,
         )
 
-    @app.post("/api/chat")
-    def chat(request: ChatRequest) -> ChatResponse:
-        """Ask a question. A question that fails ends its conversation, so start a new one."""
+    def open_session(request: ChatRequest) -> _Session:
         if request.session_id is None:
-            session = start_session(request.engine or "custom")
-        else:
-            session = find_session(request.session_id, request.engine)
+            return start_session(request.engine or "custom")
+        return find_session(request.session_id, request.engine)
+
+    def ask_in_turn(session: _Session, message: str, publish: Publish | None = None) -> ChatResponse:
         with session.lock:
             if session.closed:
                 raise HTTPException(status.HTTP_404_NOT_FOUND, _CONVERSATION_GONE)
-            return ask(session, request.message)
+            session.recorder.publish = publish
+            try:
+                return ask(session, message)
+            finally:
+                session.recorder.publish = None
+
+    @app.post("/api/chat")
+    def chat(request: ChatRequest) -> ChatResponse:
+        """Ask a question and wait for the answer. A failed question ends its conversation."""
+        return ask_in_turn(open_session(request), request.message)
+
+    @app.post("/api/chat/stream")
+    def chat_stream(request: ChatRequest) -> StreamingResponse:
+        """Ask a question and get progress as it happens.
+
+        Events: model_call, tool_start, and tool_result, then either done (the same fields as
+        POST /api/chat) or error (`status` and `detail`). A failed question ends its conversation.
+        """
+        # Done before the stream starts, so these problems still get a normal error status.
+        session = open_session(request)
+        events: queue.Queue[str | None] = queue.Queue()
+
+        def publish(event: str, payload: dict[str, Any]) -> None:
+            events.put(_server_sent_event(event, payload))
+
+        def run_agent() -> None:
+            try:
+                publish("done", ask_in_turn(session, request.message, publish).model_dump())
+            except HTTPException as err:
+                publish("error", {"status": err.status_code, "detail": err.detail})
+            except Exception:
+                logger.exception("The stream failed while answering a question.")
+                publish("error", {"status": status.HTTP_500_INTERNAL_SERVER_ERROR, "detail": _FAILED})
+            finally:
+                events.put(None)  # tells stream() that nothing more is coming
+
+        def stream() -> Iterator[str]:
+            while True:
+                try:
+                    event = events.get(timeout=KEEP_ALIVE_SECONDS)
+                except queue.Empty:
+                    yield ": keep-alive\n\n"
+                    continue
+                if event is None:
+                    return
+                yield event
+
+        threading.Thread(target=run_agent, daemon=True).start()
+        return StreamingResponse(
+            stream(),
+            media_type="text/event-stream",
+            # Asks anything in between not to store or compress the stream, which would hold
+            # updates back until the end.
+            headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"},
+        )
 
     @app.delete("/api/chat/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
     def end_chat(session_id: str) -> None:
@@ -370,6 +459,12 @@ def create_app(
 
 
 _CONVERSATION_GONE = "That conversation has ended. Start a new one."
+_FAILED = "Something went wrong answering that."
+
+
+def _server_sent_event(event: str, payload: dict[str, Any]) -> str:
+    # json.dumps writes everything on one line, as this format requires.
+    return f"event: {event}\ndata: {json.dumps(payload, default=str)}\n\n"
 
 
 def _status_for(err: anthropic.APIError) -> int:
