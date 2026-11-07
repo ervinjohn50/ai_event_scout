@@ -6,8 +6,9 @@ A free API key gives 5,000 calls/day at up to 5 requests/second.
 Two jobs live here:
 1. Build the HTTP request from the search filters.
 2. Convert Ticketmaster's deeply nested JSON into the flat `Event` model.
-   Real-world API data is messy (fields go missing all the time), so the parser
-   uses `.get()` everywhere and never assumes a field exists.
+   Real-world API data is messy (fields can be missing or null), so the parser never
+   assumes a field exists or has the expected type. Anything it can't read is treated
+   as unknown, so one odd record can't fail a whole search.
 """
 
 from __future__ import annotations
@@ -91,15 +92,15 @@ class TicketmasterEventSource:
         params["localStartDateTime"] = f"{start.isoformat()}T00:00:00,{end}"
 
         data = self._get("/events.json", params)
-        raw_events = data.get("_embedded", {}).get("events", [])
-        return [parse_event(raw) for raw in raw_events]
+        raw_events = _dict(data.get("_embedded")).get("events") or []
+        return [parse_event(raw) for raw in raw_events if _has_id(raw)]
 
     def get(self, event_id: str) -> Event | None:
         try:
             data = self._get(f"/events/{urllib.parse.quote(event_id, safe='')}.json", {})
         except _NotFound:
             return None
-        return parse_event(data)
+        return parse_event(data) if _has_id(data) else None
 
     def _get(self, path: str, params: dict[str, Any]) -> dict[str, Any]:
         query = urllib.parse.urlencode({**params, "apikey": self._api_key})
@@ -132,18 +133,24 @@ class _NotFound(Exception):
 
 
 def parse_event(raw: dict[str, Any]) -> Event:
-    """Flatten one Ticketmaster event object into an `Event`."""
-    start = raw.get("dates", {}).get("start", {})
-    venue = _first(raw.get("_embedded", {}).get("venues"))
+    """Flatten one Ticketmaster event object into an `Event`. The object must have an id."""
+    dates = _dict(raw.get("dates"))
+    start = _dict(dates.get("start"))
+    embedded = _dict(raw.get("_embedded"))
+    venue = _first(embedded.get("venues"))
     classification = _first(raw.get("classifications"))
     # A range of 0 to 0 is a placeholder on events with no price set, and doesn't mean free.
-    prices = [p for p in raw.get("priceRanges") or [] if p.get("min") or p.get("max")]
-    segment = (classification.get("segment") or {}).get("name", "")
-    genre = (classification.get("genre") or {}).get("name")
+    prices = [
+        p
+        for p in map(_dict, raw.get("priceRanges") or [])
+        if _amount(p.get("min")) or _amount(p.get("max"))
+    ]
+    segment = _dict(classification.get("segment")).get("name") or ""
+    genre = _dict(classification.get("genre")).get("name")
 
     return Event(
         id=raw["id"],
-        name=raw.get("name", "Untitled event"),
+        name=raw.get("name") or "Untitled event",
         source="ticketmaster",
         start_date=_parse_date(start.get("localDate")),
         start_time=_parse_time(start.get("localTime")),
@@ -151,32 +158,48 @@ def parse_event(raw: dict[str, Any]) -> Event:
         # Ticketmaster uses "Undefined" as a placeholder; treat it as missing.
         genre=genre if genre and genre != "Undefined" else None,
         venue=venue.get("name"),
-        venue_address=(venue.get("address") or {}).get("line1"),
-        city=(venue.get("city") or {}).get("name"),
-        state_code=(venue.get("state") or {}).get("stateCode"),
-        country_code=(venue.get("country") or {}).get("countryCode"),
-        price_min=min((p["min"] for p in prices if "min" in p), default=None),
-        price_max=max((p["max"] for p in prices if "max" in p), default=None),
-        currency=prices[0].get("currency") if prices else None,
-        status=(raw.get("dates", {}).get("status") or {}).get("code"),
+        venue_address=_dict(venue.get("address")).get("line1"),
+        city=_dict(venue.get("city")).get("name"),
+        state_code=_dict(venue.get("state")).get("stateCode"),
+        country_code=_dict(venue.get("country")).get("countryCode"),
+        price_min=min((p["min"] for p in prices if _amount(p.get("min")) is not None), default=None),
+        price_max=max((p["max"] for p in prices if _amount(p.get("max")) is not None), default=None),
+        currency=next((p["currency"] for p in prices if p.get("currency")), None),
+        status=_dict(dates.get("status")).get("code"),
         url=raw.get("url"),
-        lineup=tuple(a["name"] for a in raw.get("_embedded", {}).get("attractions", []) if "name" in a),
+        lineup=tuple(
+            name for attraction in embedded.get("attractions") or [] if (name := _dict(attraction).get("name"))
+        ),
     )
 
 
-def _first(items: list[dict[str, Any]] | None) -> dict[str, Any]:
-    return items[0] if items else {}
+def _has_id(raw: Any) -> bool:
+    """Without an id, the agent can't look an event up or save it, so it's left out."""
+    return isinstance(raw, dict) and isinstance(raw.get("id"), str) and bool(raw["id"])
 
 
-def _parse_date(value: str | None) -> date | None:
+def _dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _first(items: list[Any] | None) -> dict[str, Any]:
+    return _dict(items[0]) if items else {}
+
+
+def _amount(value: Any) -> float | None:
+    # bool counts as a number in Python, but true isn't a price.
+    return value if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+
+def _parse_date(value: Any) -> date | None:
     try:
         return date.fromisoformat(value) if value else None
-    except ValueError:
+    except (TypeError, ValueError):
         return None
 
 
-def _parse_time(value: str | None) -> time | None:
+def _parse_time(value: Any) -> time | None:
     try:
         return time.fromisoformat(value) if value else None
-    except ValueError:
+    except (TypeError, ValueError):
         return None

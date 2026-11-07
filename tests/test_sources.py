@@ -197,6 +197,68 @@ def test_ticketmaster_ignores_only_the_zero_price_ranges():
     assert parse_event(raw).price_label() == "25-40 USD"
 
 
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"name": None},
+        {"dates": None},
+        {"dates": {"start": None, "status": None}},
+        {"dates": {"start": {"localDate": 20261107, "localTime": 2000}}},
+        {"_embedded": None},
+        {"_embedded": {"venues": [None], "attractions": [None, {"name": None}, {}]}},
+        {"_embedded": {"venues": [{"address": "1 Main St", "city": None, "state": None, "country": None}]}},
+        {"classifications": [None]},
+        {"classifications": [{"segment": {"name": None}, "genre": None}]},
+        {"priceRanges": None},
+        {"priceRanges": [None, {"min": "free", "max": None}]},
+    ],
+)
+def test_ticketmaster_messy_record_still_parses(fields):
+    event = parse_event({"id": "x", **fields})
+    assert event.id == "x"
+    assert event.name
+    assert event.lineup == ()
+    assert event.price_label() is None
+    json.dumps(event.details())  # what the model receives must stay valid
+
+
+def test_ticketmaster_price_range_with_a_missing_end_uses_the_other_ranges():
+    raw = {"id": "x", "priceRanges": [{"min": None, "max": 50}, {"min": 20, "max": 40, "currency": "USD"}]}
+    assert parse_event(raw).price_label() == "20-50 USD"
+
+
+def _search_results(*events: dict) -> bytes:
+    return json.dumps({"_embedded": {"events": list(events)}}).encode()
+
+
+def test_ticketmaster_one_messy_record_does_not_lose_the_other_results():
+    body = _search_results(
+        {"id": "good-1", "name": "First"},
+        {"id": "messy", "dates": None, "priceRanges": [{"min": None, "max": 50}, {"min": 20, "max": 40}]},
+        {"id": "good-2", "name": "Second"},
+    )
+    source = TicketmasterEventSource("k", fetch=FakeFetch(body=body))
+    assert [e.id for e in source.search()] == ["good-1", "messy", "good-2"]
+
+
+@pytest.mark.parametrize("bad", [{"name": "No id"}, {"id": None}, {"id": ""}, {"id": 123}, None])
+def test_ticketmaster_search_skips_records_without_a_usable_id(bad):
+    """Without an id, the agent can't look an event up or save it."""
+    body = _search_results(bad, {"id": "good"})
+    source = TicketmasterEventSource("k", fetch=FakeFetch(body=body))
+    assert [e.id for e in source.search()] == ["good"]
+
+
+def test_ticketmaster_get_returns_none_for_a_record_without_an_id():
+    source = TicketmasterEventSource("k", fetch=FakeFetch(body=b'{"name": "No id"}'))
+    assert source.get("anything") is None
+
+
+def test_ticketmaster_search_with_null_results():
+    source = TicketmasterEventSource("k", fetch=FakeFetch(body=b'{"_embedded": null}'))
+    assert source.search() == []
+
+
 def test_ticketmaster_search_with_no_results():
     # When nothing matches, Ticketmaster leaves out "_embedded" entirely.
     source = TicketmasterEventSource("k", fetch=FakeFetch(body=b'{"page": {"totalElements": 0}}'))
