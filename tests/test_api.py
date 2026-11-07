@@ -622,6 +622,13 @@ def test_stats_are_grouped_by_engine(db_path):
     assert langgraph["questions"] == 1
 
 
+def test_the_web_api_tells_the_model_it_is_in_a_web_chat(db_path):
+    client = FakeClient([response(text("Hello"))])
+    chat(make_web_client(db_path, client=client))
+    assert "web chat" in client.requests[0]["system"]
+    assert "terminal" not in client.requests[0]["system"]
+
+
 def test_stats_are_empty_before_any_questions(db_path):
     web = make_web_client(db_path, client=FakeClient([]))
     assert web.get("/api/stats").json() == {"engines": []}

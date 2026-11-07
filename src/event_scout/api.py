@@ -60,7 +60,7 @@ from .cli import (
 from .config import PRICING, AgentConfig
 from .db import DEFAULT_DB_PATH
 from .events import EventSource
-from .prompts import build_system_prompt
+from .prompts import WEB, build_system_prompt
 from .runs import ERROR, QuestionRun, RunLog
 from .shortlist import ShortlistError, ShortlistStore
 from .tools import ToolOutcome, build_tools
@@ -277,7 +277,7 @@ def create_app(
         agent = build_agent(
             engine,
             build_tools(source, store),
-            build_system_prompt(date.today(), source.describe()),
+            build_system_prompt(date.today(), source.describe(), WEB),
             config,
             recorder,
             client=client,
