@@ -60,6 +60,7 @@
 .answer table {
   display: block;
   overflow-x: auto;
+  overflow-wrap: normal; /* a wide table scrolls, instead of splitting words in its cells */
   margin: 0 0 0.75em;
   border-collapse: collapse;
 }
