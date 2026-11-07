@@ -144,6 +144,7 @@ class EngineStats(BaseModel):
     avg_prompt_tokens: float | None
     avg_output_tokens: float | None
     total_cost_usd: float
+    unpriced_questions: int  # answered on a model with no known price, so not in the total
 
 
 class StatsResponse(BaseModel):

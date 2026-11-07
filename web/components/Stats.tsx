@@ -3,7 +3,7 @@
 import Link from "next/link";
 
 import { getStats } from "@/lib/api";
-import { engineLabel, formatDollars, formatNumber } from "@/lib/format";
+import { engineLabel, formatNumber, formatTotalCost } from "@/lib/format";
 import { useApiData } from "@/lib/useApiData";
 
 import styles from "./Pages.module.css";
@@ -59,7 +59,7 @@ export function Stats() {
                     <td>{formatNumber(row.avg_seconds)}</td>
                     <td>{formatNumber(row.avg_prompt_tokens, 0)}</td>
                     <td>{formatNumber(row.avg_output_tokens, 0)}</td>
-                    <td>{formatDollars(row.total_cost_usd)}</td>
+                    <td>{formatTotalCost(row.total_cost_usd, row.unpriced_questions)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -67,8 +67,9 @@ export function Stats() {
           </div>
           <p className={styles.footnote}>
             Covers questions asked through this web app. Costs are estimates. Failed questions are left out of the
-            averages, and any tokens they used aren&rsquo;t in the total, so the real cost can be a little higher. With
-            a small number of questions, differences between engines can easily be chance.
+            averages, and any tokens they used aren&rsquo;t in the total, so the real cost can be a little higher.
+            Questions on a model with no known price aren&rsquo;t in the total either. With a small number of questions,
+            differences between engines can easily be chance.
           </p>
         </>
       )}

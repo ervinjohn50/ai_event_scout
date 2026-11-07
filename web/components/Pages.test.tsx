@@ -140,7 +140,18 @@ describe("Stats", () => {
     avg_prompt_tokens: 4874.2,
     avg_output_tokens: 278.4,
     total_cost_usd: 0.0195,
+    unpriced_questions: 0,
   };
+
+  it("doesn't show $0.00 for questions on a model with no known price", async () => {
+    stubFetch(json({ engines: [{ ...stats, total_cost_usd: 0, unpriced_questions: 3 }] }));
+    render(<Stats />);
+
+    const row = (await screen.findByRole("rowheader", { name: "Custom loop" })).closest("tr")!;
+    const cells = within(row).getAllByRole("cell").map((cell) => cell.textContent);
+    expect(cells.at(-1)).toBe("Unknown");
+    expect(screen.getByText(/no known price/)).toBeInTheDocument();
+  });
 
   it("shows a row for each engine", async () => {
     stubFetch(json({ engines: [stats, { ...stats, engine: "langgraph", questions: 1, errors: 0 }] }));

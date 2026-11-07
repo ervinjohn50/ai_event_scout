@@ -53,3 +53,9 @@ export function formatDollars(value: number): string {
   if (value === 0) return "$0.00";
   return value < 0.01 ? "under $0.01" : `$${value.toFixed(2)}`;
 }
+
+/** A total cost that doesn't look complete, or free, when some questions have no known price. */
+export function formatTotalCost(total: number, unpricedQuestions: number): string {
+  if (unpricedQuestions === 0) return formatDollars(total);
+  return total === 0 ? "Unknown" : `${formatDollars(total)} + ${unpricedQuestions} unpriced`;
+}

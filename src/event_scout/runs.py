@@ -16,6 +16,8 @@ ERROR = "error"
 # COUNT(*) includes every question. The averages leave out failed questions, which have no
 # steps or tokens to measure and would pull the averages down. The total cost has the same
 # gap: a question that fails partway may have used tokens that aren't counted here.
+# An answered question with no cost used a model with no known price. It's counted separately,
+# so a total of 0 can't be mistaken for free.
 _STATS_BY_ENGINE = """
     SELECT
         engine,
@@ -27,7 +29,8 @@ _STATS_BY_ENGINE = """
         AVG(input_tokens + cache_read_tokens + cache_write_tokens)
             FILTER (WHERE stop_reason <> :error) AS avg_prompt_tokens,
         AVG(output_tokens) FILTER (WHERE stop_reason <> :error) AS avg_output_tokens,
-        COALESCE(SUM(cost_usd), 0) AS total_cost_usd
+        COALESCE(SUM(cost_usd), 0) AS total_cost_usd,
+        COUNT(*) FILTER (WHERE cost_usd IS NULL AND stop_reason <> :error) AS unpriced_questions
     FROM question_runs
     GROUP BY engine
     ORDER BY engine

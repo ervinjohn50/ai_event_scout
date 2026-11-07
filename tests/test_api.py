@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from event_scout import api as api_module  # noqa: E402
 from event_scout import server  # noqa: E402
 from event_scout.api import MAX_MESSAGE_LENGTH, create_app  # noqa: E402
+from event_scout.config import AgentConfig  # noqa: E402
 from event_scout.events import SampleEventSource  # noqa: E402
 from event_scout.runs import QuestionRun, RunLog  # noqa: E402
 from event_scout.shortlist import ShortlistStore  # noqa: E402
@@ -620,6 +621,33 @@ def test_stats_are_grouped_by_engine(db_path):
     assert custom["total_cost_usd"] == pytest.approx(0.04)
     assert langgraph["engine"] == "langgraph"
     assert langgraph["questions"] == 1
+
+
+def test_stats_count_answered_questions_with_no_known_price(db_path):
+    log = RunLog(db_path)
+    log.record(run("custom", cost=0.01))
+    log.record(run("custom", cost=None))
+    log.record(run("custom", cost=None))
+    log.record(run("custom", "error", cost=None))  # a failure has no cost, but isn't a pricing gap
+    web = make_web_client(db_path, client=FakeClient([]))
+    stats = web.get("/api/stats").json()["engines"][0]
+    assert stats["total_cost_usd"] == pytest.approx(0.01)
+    assert stats["unpriced_questions"] == 2
+
+
+def test_a_model_with_no_known_price_is_reported_as_unpriced(db_path):
+    client = FakeClient([response(text("Hello"))])
+    web = make_web_client(db_path, client=client, config=AgentConfig(model="model-with-no-price"))
+    assert chat(web).json()["cost_usd"] is None
+    stats = web.get("/api/stats").json()["engines"][0]
+    assert stats["total_cost_usd"] == 0
+    assert stats["unpriced_questions"] == 1
+
+
+def test_a_failed_question_is_not_reported_as_unpriced(db_path):
+    RunLog(db_path).record(run("custom", "error", cost=None))
+    web = make_web_client(db_path, client=FakeClient([]))
+    assert web.get("/api/stats").json()["engines"][0]["unpriced_questions"] == 0
 
 
 def test_the_web_api_tells_the_model_it_is_in_a_web_chat(db_path):

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { engineLabel, formatDollars, formatEventDate, formatNumber, safeUrl } from "./format";
+import { engineLabel, formatDollars, formatEventDate, formatNumber, formatTotalCost, safeUrl } from "./format";
 
 describe("formatEventDate", () => {
   it("keeps the same calendar day, even west of UTC", () => {
@@ -37,6 +37,13 @@ describe("numbers", () => {
     expect(formatDollars(0)).toBe("$0.00");
     expect(formatDollars(0.004)).toBe("under $0.01");
     expect(formatDollars(1.5)).toBe("$1.50");
+  });
+
+  it("doesn't call a total complete when some questions have no known price", () => {
+    expect(formatTotalCost(1.5, 0)).toBe("$1.50");
+    expect(formatTotalCost(0, 0)).toBe("$0.00");
+    expect(formatTotalCost(1.5, 2)).toBe("$1.50 + 2 unpriced");
+    expect(formatTotalCost(0, 2)).toBe("Unknown");
   });
 });
 

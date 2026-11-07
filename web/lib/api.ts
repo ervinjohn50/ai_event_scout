@@ -73,6 +73,7 @@ export interface EngineStats {
   avg_prompt_tokens: number | null;
   avg_output_tokens: number | null;
   total_cost_usd: number;
+  unpriced_questions: number;
 }
 
 export interface StatsResponse {
