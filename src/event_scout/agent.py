@@ -55,6 +55,37 @@ class AgentReply:
     usage: TokenUsage = field(default_factory=TokenUsage)
 
 
+# --- What the user sees when a question ends. Both engines use these. ------------------------
+
+
+def final_text(response: Any) -> str:
+    """The answer to show, with a note if the reply was declined or cut off."""
+    text = "\n".join(block.text for block in response.content if block.type == "text").strip()
+
+    if response.stop_reason == "refusal":
+        details = getattr(response, "stop_details", None)
+        category = getattr(details, "category", None)
+        reason = f" (category: {category})" if category else ""
+        return (text + "\n\n" if text else "") + f"(Claude declined this request{reason}.)"
+
+    if response.stop_reason in ("max_tokens", "model_context_window_exceeded"):
+        return (text + "\n\n" if text else "") + (
+            f"(The reply was cut off: stop_reason={response.stop_reason}.)"
+        )
+
+    return text or "(Claude finished without writing a reply.)"
+
+
+def step_limit_reply(max_steps: int, usage: TokenUsage) -> AgentReply:
+    """The reply when the model never finished. Stops it from looping (and costing) forever."""
+    return AgentReply(
+        f"(Stopped after {max_steps} steps without a final answer. Try a more specific question.)",
+        "step_limit",
+        max_steps,
+        usage,
+    )
+
+
 class ScoutAgent:
     def __init__(
         self,
@@ -113,16 +144,10 @@ class ScoutAgent:
             # Anything else ends the turn: "end_turn" (finished), "max_tokens" (cut off),
             # "refusal" (declined), and so on.
             self._answer_unrun_tool_calls(response.content)
-            return AgentReply(self._final_text(response), response.stop_reason, step, usage)
+            return AgentReply(final_text(response), response.stop_reason, step, usage)
 
-        # 4. Safety net: Claude never finished. Stop instead of looping (and paying) forever.
-        return AgentReply(
-            f"(Stopped after {self.config.max_steps} steps without a final answer. "
-            "Try a more specific question.)",
-            "step_limit",
-            self.config.max_steps,
-            usage,
-        )
+        # 4. Safety net: Claude never finished.
+        return step_limit_reply(self.config.max_steps, usage)
 
     # --- The three things the loop does ---------------------------------------------------
 
@@ -191,22 +216,6 @@ class ScoutAgent:
                     ],
                 }
             )
-
-    def _final_text(self, response: Any) -> str:
-        text = "\n".join(block.text for block in response.content if block.type == "text").strip()
-
-        if response.stop_reason == "refusal":
-            details = getattr(response, "stop_details", None)
-            category = getattr(details, "category", None)
-            reason = f" (category: {category})" if category else ""
-            return (text + "\n\n" if text else "") + f"(Claude declined this request{reason}.)"
-
-        if response.stop_reason in ("max_tokens", "model_context_window_exceeded"):
-            return (text + "\n\n" if text else "") + (
-                f"(The reply was cut off: stop_reason={response.stop_reason}.)"
-            )
-
-        return text or "(Claude finished without writing a reply.)"
 
     # --- Debugging: the conversation exactly as the API sees it ---------------------------------------
 

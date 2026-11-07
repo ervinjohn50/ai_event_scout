@@ -26,7 +26,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langgraph.errors import GraphRecursionError
 
-from .agent import AgentObserver, AgentReply
+from .agent import AgentObserver, AgentReply, final_text, step_limit_reply
 from .config import FALLBACK_BETA, AgentConfig
 from .langchain_tools import to_langchain_tools
 from .tools import ToolOutcome, ToolRegistry
@@ -111,16 +111,10 @@ class LangGraphScoutAgent:
                                 step += 1
                                 self.observer.on_model_call(step, self.export_messages())
         except GraphRecursionError:
-            return AgentReply(
-                f"(Stopped after {self.config.max_steps} steps without a final answer. "
-                "Try a more specific question.)",
-                "step_limit",
-                self.config.max_steps,
-                usage,
-            )
+            return step_limit_reply(self.config.max_steps, usage)
 
         response = _as_api_response(last_reply)
-        return AgentReply(_final_text(response), response.stop_reason, step, usage)
+        return AgentReply(final_text(response), response.stop_reason, step, usage)
 
     def export_messages(self) -> list[dict[str, Any]]:
         """The conversation in the API's format, for the CLI's /history command."""
@@ -203,20 +197,3 @@ def _usage(message: AIMessage) -> SimpleNamespace:
         cache_creation_input_tokens=cache_write,
         output_tokens=usage.get("output_tokens", 0),
     )
-
-
-def _final_text(response: SimpleNamespace) -> str:
-    """Same wording as `ScoutAgent._final_text`. A test checks that the two stay in sync."""
-    text = "\n".join(block.text for block in response.content if block.type == "text").strip()
-
-    if response.stop_reason == "refusal":
-        category = getattr(response.stop_details, "category", None)
-        reason = f" (category: {category})" if category else ""
-        return (text + "\n\n" if text else "") + f"(Claude declined this request{reason}.)"
-
-    if response.stop_reason in ("max_tokens", "model_context_window_exceeded"):
-        return (text + "\n\n" if text else "") + (
-            f"(The reply was cut off: stop_reason={response.stop_reason}.)"
-        )
-
-    return text or "(Claude finished without writing a reply.)"
