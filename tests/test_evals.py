@@ -310,6 +310,55 @@ def test_prices_from_the_question_are_allowed():
     assert all(c.passed for c in checks)
 
 
+@pytest.mark.parametrize(
+    "prices",
+    [
+        "$22-99",
+        "$22–99",  # en dash
+        "$22 - 99",
+        "$22 to 99",
+        "$22 to $99",
+        "**$22**-99",
+        "22-99 USD",
+        "22 to 99 USD",
+        "99 USD",
+        "€99",
+        "$1,099",
+    ],
+)
+def test_an_invented_price_is_caught_in_any_format(prices):
+    """Gravel Hymnal costs 22-30 USD, so 99 was made up wherever it appears."""
+    checks = graded_answer("city-search", f"Gravel Hymnal ({prices}) and Juniper Vale.")
+    assert "only states facts from tools" in [c.name for c in checks if not c.passed]
+
+
+@pytest.mark.parametrize(
+    "prices",
+    [
+        "$22-30",
+        "$22–30",
+        "$22 - $30",
+        "$22 to $30",
+        "$22 to 30",
+        "$22.00-$30.00",
+        "**$22**-30",
+        "22-30 USD",
+        "22 to 30 usd",
+        "$22 - 7:30 PM",  # a time after a price isn't a price
+        "$22 to 8pm",
+        "$22 - 11/5",  # neither is a date
+    ],
+)
+def test_a_correct_price_passes_in_any_format(prices):
+    checks = graded_answer("city-search", f"Gravel Hymnal ({prices}) and Juniper Vale.")
+    assert [c.name for c in checks if not c.passed] == []
+
+
+def test_a_date_before_a_price_is_not_read_as_part_of_it():
+    checks = graded_answer("city-search", "Gravel Hymnal, Nov 5 - 22 USD, and Juniper Vale.")
+    assert [c.name for c in checks if not c.passed] == []
+
+
 def test_any_valid_route_to_the_answer_passes():
     """Details can be fetched without a search first, because the path isn't graded."""
     checks = graded_answer(

@@ -288,21 +288,47 @@ def _check_grounded(record: RunRecord, case: Case, known_events: Iterable[str]) 
     """
     results_text = "\n".join(call.result for call in record.tool_calls)
     answers = "\n".join(record.answers)
-    allowed_prices = set(re.findall(r"\d+(?:\.\d+)?", " ".join(_prices_in(record) + case.turns)))
+    normalized_answers, normalized_results = _normalize(answers), _normalize(results_text)
+    allowed_prices = {_as_number(n) for n in re.findall(_NUMBER, " ".join(_prices_in(record) + case.turns))}
     problems = []
 
-    for price in re.findall(r"[$£]\s?(\d+(?:\.\d+)?)", answers):
-        if price not in allowed_prices:
+    for price in _money_in(normalized_answers):
+        if _as_number(price) not in allowed_prices:
             problems.append(f"price {price}")
     for url in re.findall(r"https?://[^\s)\]>\"'`]+", answers):
         if url.rstrip(".,;:!*") not in results_text:
             problems.append(f"link {url}")
-    normalized_answers, normalized_results = _normalize(answers), _normalize(results_text)
     for name in known_events:
         if _normalize(name) in normalized_answers and _normalize(name) not in normalized_results:
             problems.append(f"event '{name}'")
 
     return Check("only states facts from tools", not problems, ", ".join(problems))
+
+
+# The number formats and ranges an answer can use for a price: "$22-30", "$22 to $30",
+# "$22.00", "$1,250", "22-30 USD". The second number of a range is what's easy to miss.
+_NUMBER = r"\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?"
+_DASH = "[-\u2010\u2011\u2013\u2014]"
+# In "$22 - 7:30 PM" or "$22 - 11/5", what follows the dash is a time or a date, not a price.
+_NOT_TIME_OR_DATE = r"(?![\d:/]|\s?[ap]\.?m\b)"
+_MONEY = re.compile(
+    # With a currency symbol first: the range's second number may leave the symbol out.
+    rf"[$£€]\s?({_NUMBER})(?:\s*(?:{_DASH}|to)\s*({_NUMBER}){_NOT_TIME_OR_DATE})?"
+    # With a currency code last. Spaces around a dash aren't allowed here, so "Nov 5 - 22 USD"
+    # doesn't read the date as part of the price.
+    rf"|({_NUMBER})(?:(?:{_DASH}|\s+to\s+)({_NUMBER}))?\s?(?:usd|gbp|cad|eur)\b",
+    re.IGNORECASE,
+)
+
+
+def _money_in(text: str) -> list[str]:
+    """Every number written as a price, including both ends of a range."""
+    return [number for match in _MONEY.findall(text) for number in match if number]
+
+
+def _as_number(text: str) -> float:
+    """So that "$28.00" and a tool result's "28" count as the same price."""
+    return float(text.replace(",", ""))
 
 
 def _prices_in(record: RunRecord) -> list[str]:
